@@ -27,16 +27,27 @@ PluginComponent {
         if (pluginService) pluginService.savePluginData(pluginId, "threshold", String(t))
     }
 
-    // One widget instance exists per bar/screen; this lock keeps a single `cswap auto` running.
-    readonly property string lockPath: logic.lockFile(Quickshell.env("XDG_RUNTIME_DIR"), Quickshell.env("HOME"))
+    // One widget instance exists per bar/screen. They elect a single owner through
+    // PluginService.globalVars: only the owner polls cswap and runs the auto loop,
+    // and every instance renders the state it publishes.
+    readonly property string instanceToken: Math.random().toString(36).slice(2) + Date.now().toString(36)
+    readonly property var shared: PluginService.globalVars[pluginId] || ({})
+    readonly property bool isOwner: shared.owner === instanceToken
+    // Taken over when the owner stops publishing (e.g. it died without onDestruction).
+    readonly property int ownerStaleSeconds: 150
 
-    property var accounts: []
-    property int activeNumber: -1
-    property bool installed: true
-    property bool loaded: false
+    readonly property var accounts: shared.accounts || []
+    readonly property int activeNumber: shared.activeNumber === undefined ? -1 : shared.activeNumber
+    readonly property bool installed: shared.installed !== false
+    readonly property bool loaded: shared.loaded === true
+    readonly property string lastError: shared.lastError || ""
     property bool busy: false
-    property string lastError: ""
     property int now: Math.floor(Date.now() / 1000)
+
+    // The flock still guards the short overlap when a reload replaces the owner.
+    readonly property string lockPath: logic.lockFile(Quickshell.env("XDG_RUNTIME_DIR"), Quickshell.env("HOME"))
+    readonly property int maxLockRetries: 5
+    property int lockRetries: 0
 
     readonly property var active: accounts.find(a => a.number === activeNumber) || null
 
@@ -61,6 +72,24 @@ PluginComponent {
         return parts.join(" · ")
     }
 
+    // ---- shared state ----
+    function publish(state) {
+        for (const k in state)
+            PluginService.setGlobalVar(pluginId, k, state[k])
+    }
+
+    function claimOwnership() {
+        const seen = shared.ownerSeen || 0
+        if (!shared.owner || now - seen > ownerStaleSeconds)
+            publish({ owner: instanceToken, ownerSeen: now })
+    }
+
+    onIsOwnerChanged: {
+        lockRetries = 0
+        syncAuto()
+        if (isOwner) refresh()
+    }
+
     // ---- cswap ----
     function run(id, args, cb) {
         Proc.runCommand(id, logic.runCommand(args), cb, 0, 60000)
@@ -68,15 +97,17 @@ PluginComponent {
 
     function refresh() {
         run("claudeSwap.list", ["list", "--json"], function (out, code) {
-            root.loaded = true
-            root.installed = code !== logic.exitMissing
-            if (!root.installed) return
+            if (code === logic.exitMissing) {
+                root.publish({ loaded: true, installed: false })
+                return
+            }
             const r = logic.parseList(out)
-            if (r.error === "cswap") { root.lastError = r.message || I18n.trFor("claudeSwap", "cswap error"); return }
-            if (r.error) { root.lastError = I18n.trFor("claudeSwap", "unexpected output from cswap list"); return }
-            root.accounts = r.accounts
-            root.activeNumber = r.activeNumber
-            root.lastError = ""
+            if (r.error === "cswap")
+                root.publish({ loaded: true, installed: true, lastError: r.message || I18n.trFor("claudeSwap", "cswap error") })
+            else if (r.error)
+                root.publish({ loaded: true, installed: true, lastError: I18n.trFor("claudeSwap", "unexpected output from cswap list") })
+            else
+                root.publish({ loaded: true, installed: true, lastError: "", accounts: r.accounts, activeNumber: r.activeNumber })
         })
     }
 
@@ -96,9 +127,16 @@ PluginComponent {
         })
     }
 
+    // The plugin setting overrides the terminal DMS resolves (its setting, then $TERMINAL).
+    function terminalPrefix() {
+        const custom = String(pluginData.terminal || "").trim()
+        if (custom) return custom.split(/\s+/)
+        return [MuxService.terminal].concat(MuxService.getTerminalFlag(MuxService.terminal))
+    }
+
     // `claude auth login` does not log out, so saved accounts keep valid tokens.
     function addAccount() {
-        Quickshell.execDetached(logic.addAccountCommand(pluginData.terminal, [
+        Quickshell.execDetached(logic.addAccountCommand(terminalPrefix(), [
             I18n.trFor("claudeSwap", "Sign in with the NEW account in your browser."),
             I18n.trFor("claudeSwap", "Account added."),
             I18n.trFor("claudeSwap", "Failed."),
@@ -118,8 +156,9 @@ PluginComponent {
         if (pluginService) pluginService.savePluginData(pluginId, "autoSwap", on)
     }
 
-    // ---- auto switch ----
+    // ---- auto switch (owner only) ----
     function onAutoEvent(line) {
+        lockRetries = 0
         const ev = logic.parseAutoEvent(line)
         if (ev.kind === "switch") {
             ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: quota limit reached, switched to %1").arg(label(ev.to)))
@@ -130,28 +169,48 @@ PluginComponent {
     }
 
     function syncAuto() {
-        if (autoOn && installed && !autoProc.running)
+        const want = isOwner && autoOn && installed && lockRetries < maxLockRetries
+        if (want && !autoProc.running)
             autoProc.running = true
-        else if (!autoOn && autoProc.running)
+        else if (!(isOwner && autoOn) && autoProc.running)
             autoProc.running = false
     }
 
-    onAutoOnChanged: syncAuto()
-    onThresholdChanged: if (autoProc.running) autoProc.running = false   // the retry timer restarts it with the new threshold
+    onAutoOnChanged: { lockRetries = 0; syncAuto() }
+    onInstalledChanged: syncAuto()
+    onThresholdChanged: if (autoProc.running) autoProc.running = false   // the watchdog restarts it with the new threshold
 
     Process {
         id: autoProc
         command: logic.autoCommand(root.lockPath, root.threshold)
         stdout: SplitParser { onRead: data => root.onAutoEvent(data) }
-        // Lock busy: another instance, or the previous one still exiting after a reload.
-        onExited: (code, status) => { if (code === logic.exitLocked && root.autoOn) lockRetry.restart() }
+        // Lock busy right after a reload: the previous owner's process is still exiting.
+        onExited: (code, status) => {
+            if (code === logic.exitLocked && root.isOwner && root.autoOn && ++root.lockRetries < root.maxLockRetries)
+                lockRetry.restart()
+        }
     }
     Timer { id: lockRetry; interval: 3000; onTriggered: root.syncAuto() }
 
-    Component.onCompleted: { refresh(); syncAuto() }
-    Timer { interval: 60000; running: true; repeat: true; onTriggered: root.refresh() }
-    // Restart the loop if the instance holding the lock goes away or the process dies.
-    Timer { interval: 30000; running: root.autoOn; repeat: true; triggeredOnStart: true; onTriggered: root.syncAuto() }
+    Component.onCompleted: claimOwnership()
+    Component.onDestruction: {
+        if (isOwner) publish({ owner: "" })
+    }
+    onSharedChanged: if (!shared.owner) claimOwnership()
+
+    Timer {
+        interval: 60000; running: true; repeat: true
+        onTriggered: {
+            if (root.isOwner) {
+                root.publish({ ownerSeen: root.now })
+                root.refresh()
+            } else {
+                root.claimOwnership()
+            }
+        }
+    }
+    // Restart the loop if it dies; stays quiet once the lock retries are used up.
+    Timer { interval: 30000; running: root.isOwner && root.autoOn; repeat: true; onTriggered: root.syncAuto() }
     Timer { interval: 30000; running: true; repeat: true; onTriggered: root.now = Math.floor(Date.now() / 1000) }
 
     // ---- bar ----
@@ -190,12 +249,12 @@ PluginComponent {
                         return [u.fiveHour, u.sevenDay].filter(w => root.pct(w) >= 0)
                     }
                     delegate: Row {
-                        spacing: 5
+                        spacing: Theme.spacingXS
                         Layout.alignment: Qt.AlignVCenter
                         UsageRing {
                             percentage: root.pct(modelData)
                             ringColor: root.color(root.pct(modelData))
-                            diameter: Math.max(12, Math.min(pill.height - 9, 18))
+                            diameter: Math.max(Theme.iconSizeSmall - Theme.spacingXS, Math.min(Theme.iconSizeSmall + Theme.spacingXXS, pill.height - Theme.spacingS))
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         StyledText {
@@ -234,9 +293,7 @@ PluginComponent {
     }
 
     // ---- popout ----
-    readonly property int cardHeight: 92
     popoutWidth: 400
-    popoutHeight: 150 + (autoOn ? 104 : 64) + Math.max(1, accounts.length) * (cardHeight + Theme.spacingS)
 
     component UsageBar: Item {
         id: bar
@@ -244,11 +301,11 @@ PluginComponent {
         property var win: null
         readonly property int p: root.pct(win)
         width: parent ? parent.width : 0
-        height: 18
+        height: barValue.implicitHeight
 
         StyledText {
             id: barName
-            width: 64
+            width: Theme.fontSizeSmall * 5
             anchors.verticalCenter: parent.verticalCenter
             text: bar.name
             font.pixelSize: Theme.fontSizeSmall
@@ -261,25 +318,26 @@ PluginComponent {
             anchors.right: barValue.left
             anchors.rightMargin: Theme.spacingM
             anchors.verticalCenter: parent.verticalCenter
-            height: 6
-            radius: 3
+            height: Theme.spacingXS + Theme.spacingXXS
+            radius: height / 2
             color: Theme.surfaceVariant
             Rectangle {
                 width: parent.width * Math.max(0, Math.min(100, bar.p)) / 100
                 height: parent.height
-                radius: 3
+                radius: height / 2
                 color: root.color(bar.p)
                 Behavior on width { NumberAnimation { duration: Theme.shortDuration } }
             }
         }
         StyledText {
             id: barValue
-            width: 112
+            width: Theme.fontSizeSmall * 9
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             horizontalAlignment: Text.AlignRight
             wrapMode: Text.NoWrap
-            text: bar.p < 0 ? "—" : bar.p + "% · " + root.countdown(bar.win.resetsAt)
+            readonly property string reset: bar.p < 0 ? "" : root.countdown(bar.win.resetsAt)
+            text: bar.p < 0 ? "—" : reset ? bar.p + "% · " + reset : bar.p + "%"
             font.pixelSize: Theme.fontSizeSmall
             font.features: { "tnum": 1 }
             color: bar.p >= root.critPct ? Theme.error : Theme.surfaceText
@@ -302,7 +360,7 @@ PluginComponent {
                     DActionButton {
                         iconName: "person_add"
                         iconColor: Theme.surfaceVariantText
-                        buttonSize: 28
+                        buttonSize: Theme.buttonHeightXXS
                         tooltipText: I18n.trFor("claudeSwap", "Add account")
                         tooltipSide: "bottom"
                         enabled: root.installed
@@ -311,7 +369,7 @@ PluginComponent {
                     DActionButton {
                         iconName: "bolt"
                         iconColor: Theme.surfaceVariantText
-                        buttonSize: 28
+                        buttonSize: Theme.buttonHeightXXS
                         tooltipText: I18n.trFor("claudeSwap", "Switch to the account with the most quota left")
                         tooltipSide: "bottom"
                         enabled: root.installed && !root.busy && root.accounts.length > 1
@@ -320,7 +378,7 @@ PluginComponent {
                     DActionButton {
                         iconName: "refresh"
                         iconColor: Theme.surfaceVariantText
-                        buttonSize: 28
+                        buttonSize: Theme.buttonHeightXXS
                         tooltipText: I18n.trFor("claudeSwap", "Refresh")
                         tooltipSide: "bottom"
                         onClicked: root.refresh()
@@ -341,7 +399,7 @@ PluginComponent {
                         readonly property var u: root.usageOf(modelData)
 
                         width: parent.width
-                        height: root.cardHeight
+                        height: cardCol.implicitHeight + Theme.spacingM * 2
                         radius: Theme.cornerRadius
                         color: isActive ? Theme.surfaceContainerHighest
                              : area.containsMouse ? Theme.surfaceHover : Theme.surfaceContainerHigh
@@ -358,22 +416,26 @@ PluginComponent {
                         }
 
                         Column {
-                            anchors.fill: parent
+                            id: cardCol
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
                             anchors.margins: Theme.spacingM
                             spacing: Theme.spacingS
 
                             Item {
                                 width: parent.width
-                                height: 22
+                                height: Math.max(radio.height, accountName.implicitHeight, planChip.height)
                                 DIcon {
                                     id: radio
                                     anchors.left: parent.left
                                     anchors.verticalCenter: parent.verticalCenter
                                     name: acct.isActive ? "radio_button_checked" : "radio_button_unchecked"
-                                    size: Theme.iconSize - 6
+                                    size: Theme.iconSizeMedium
                                     color: acct.isActive ? Theme.primary : Theme.surfaceVariantText
                                 }
                                 StyledText {
+                                    id: accountName
                                     anchors.left: radio.right
                                     anchors.leftMargin: Theme.spacingS
                                     anchors.right: planChip.left
@@ -391,15 +453,15 @@ PluginComponent {
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: planText.implicitWidth + Theme.spacingS * 2
-                                    height: 20
-                                    radius: 10
+                                    height: planText.implicitHeight + Theme.spacingXS
+                                    radius: height / 2
                                     color: Theme.surfaceVariant
                                     StyledText {
                                         id: planText
                                         anchors.centerIn: parent
                                         textFormat: Text.PlainText
                                         text: acct.modelData.plan ? acct.modelData.plan.label : ""
-                                        font.pixelSize: Theme.fontSizeSmall - 1
+                                        font.pixelSize: Theme.fontSizeXSmall
                                         color: Theme.surfaceVariantText
                                     }
                                 }
@@ -407,7 +469,7 @@ PluginComponent {
 
                             Column {
                                 width: parent.width
-                                spacing: 4
+                                spacing: Theme.spacingXS
                                 visible: !!acct.u
                                 UsageBar { name: I18n.trFor("claudeSwap", "5h"); win: acct.u ? acct.u.fiveHour : null }
                                 UsageBar { name: I18n.trFor("claudeSwap", "Week"); win: acct.u ? acct.u.sevenDay : null }
@@ -453,7 +515,7 @@ PluginComponent {
                                 anchors.left: parent.left
                                 anchors.verticalCenter: parent.verticalCenter
                                 name: root.autoOn ? "sync" : "sync_disabled"
-                                size: Theme.iconSize - 4
+                                size: Theme.iconSizeMedium
                                 color: root.autoOn ? Theme.primary : Theme.surfaceVariantText
                             }
                             StyledText {
@@ -486,7 +548,7 @@ PluginComponent {
                                     required property int index
                                     readonly property bool sel: Math.abs(root.threshold - modelData) < 0.01
                                     width: parent.width / root.thresholdOptions.length
-                                    height: 30
+                                    height: Theme.buttonHeightXXS
                                     radius: Theme.cornerRadius
                                     color: sel ? Theme.primary : segArea.containsMouse ? Theme.surfaceHover : "transparent"
                                     StyledText {

@@ -28,8 +28,8 @@ PluginSettings {
     StringSetting {
         settingKey: "terminal"
         label: I18n.trFor("claudeSwap", "Terminal")
-        description: I18n.trFor("claudeSwap", "Command used to sign in a new account (`sh -c ...` is appended)")
-        placeholder: "alacritty -e"
-        defaultValue: "alacritty -e"
+        description: I18n.trFor("claudeSwap", "Leave empty to use the DMS terminal. Otherwise the command that runs a program in your terminal, e.g. `kitty -e`.")
+        placeholder: "kitty -e"
+        defaultValue: ""
     }
 }

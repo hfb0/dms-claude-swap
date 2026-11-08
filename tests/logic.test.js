@@ -85,8 +85,7 @@ test('lockFile never falls back to a shared /tmp', () => {
 test('switchArgs and addAccountCommand', () => {
     assert.deepEqual(L.switchArgs('best'), ['switch', '--strategy', 'best', '--json']);
     assert.deepEqual(L.switchArgs(2), ['switch', '2', '--json']);
-    const cmd = L.addAccountCommand('  kitty   -e ', ['a', 'b', 'c', 'd']);
-    assert.deepEqual(cmd.slice(0, 4), ['kitty', '-e', 'sh', '-c']);
+    const cmd = L.addAccountCommand(['gnome-terminal', '--'], ['a', 'b', 'c', 'd']);
+    assert.deepEqual(cmd.slice(0, 4), ['gnome-terminal', '--', 'sh', '-c']);
     assert.deepEqual(cmd.slice(-5), ['sh', 'a', 'b', 'c', 'd']);
-    assert.equal(L.addAccountCommand('', [])[0], 'alacritty');
 });

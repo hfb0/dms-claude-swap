@@ -41,11 +41,11 @@
   "Claude: quota limit reached, switched to %1": {
     "Claude: quota limit reached, switched to %1": "Claude: cota no limite, trocou para %1"
   },
-  "Command used to sign in a new account (`sh -c ...` is appended)": {
-    "Command used to sign in a new account (`sh -c ...` is appended)": "Comando usado para o login de uma conta nova (recebe `sh -c ...` no fim)"
-  },
   "Failed.": {
     "Failed.": "Falhou."
+  },
+  "Leave empty to use the DMS terminal. Otherwise the command that runs a program in your terminal, e.g. `kitty -e`.": {
+    "Leave empty to use the DMS terminal. Otherwise the command that runs a program in your terminal, e.g. `kitty -e`.": "Deixe vazio para usar o terminal do DMS. Senão, o comando que abre um programa no seu terminal, por exemplo `kitty -e`."
   },
   "No accounts yet. Run `cswap add`, /login with the other account, then run `cswap add` again.": {
     "No accounts yet. Run `cswap add`, /login with the other account, then run `cswap add` again.": "Nenhuma conta cadastrada. Rode `cswap add`, faça /login na outra conta e `cswap add` de novo."

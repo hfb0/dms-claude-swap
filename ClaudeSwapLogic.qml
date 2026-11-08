@@ -35,12 +35,12 @@ QtObject {
                 "sh", lockPath, String(threshold)]
     }
 
+    // terminalPrefix: argv that runs a command in a terminal, e.g. ["kitty", "-e"].
     // messages: [intro, added, failed, pressEnter]
-    function addAccountCommand(terminal, messages) {
+    function addAccountCommand(terminalPrefix, messages) {
         var script = 'echo "$1"; echo; claude auth login && cswap add && echo && echo "$2" || echo "$3"; '
             + 'echo; printf "%s" "$4"; read x'
-        var term = String(terminal || "alacritty -e").trim().split(/\s+/)
-        return term.concat(["sh", "-c", pathPrefix + script, "sh"]).concat(messages)
+        return terminalPrefix.concat(["sh", "-c", pathPrefix + script, "sh"]).concat(messages)
     }
 
     function switchArgs(target) {

@@ -2,7 +2,7 @@
   "id": "claudeSwap",
   "name": "Claude Swap",
   "description": "Switch between Claude Code accounts (claude-swap): per-account usage, one-click switching and optional auto switch when quota runs out.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "author": "Henrique Barbosa",
   "type": "widget",
   "capabilities": [
@@ -12,8 +12,9 @@
   "settings": "./ClaudeSwapSettings.qml",
   "icon": "swap_horiz",
   "requires_dms": ">=2.1.0",
-  "requires": [
-    "cswap",
+  "dependencies": [
+    "claude-swap",
+    "claude",
     "flock"
   ],
   "permissions": [

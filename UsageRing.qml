@@ -43,6 +43,7 @@ Item {
             target: root
             function onPercentageChanged() { canvas.requestPaint() }
             function onRingColorChanged() { canvas.requestPaint() }
+            function onDiameterChanged() { canvas.requestPaint() }
         }
     }
 }
