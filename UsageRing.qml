@@ -16,6 +16,7 @@ Item {
 
     Canvas {
         id: canvas
+        renderStrategy: Canvas.Cooperative
         anchors.fill: parent
         onPaint: {
             const ctx = getContext("2d")

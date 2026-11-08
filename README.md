@@ -41,6 +41,25 @@ cswap add            # saves the account you are signed in to
 cswap add
 ```
 
+## Updating
+
+```sh
+git -C ~/.config/DankMaterialShell/plugins/claudeSwap pull
+dms restart
+```
+
+DMS caches the plugin directory, so new files from an update only load after a restart.
+
+## Development
+
+Pure logic lives in `ClaudeSwapLogic.qml` (plain functions, no bindings) so it can run under node:
+
+```sh
+node --test tests/*.test.js
+```
+
+The tests cover JSON parsing, countdown formatting, the shell wrappers (against a fake `cswap`, including the auto-switch lock), the manifest, and translation coverage.
+
 ## Translations
 
 The UI is in English, with a Brazilian Portuguese translation in `translations/pt_BR.json`.

@@ -13,6 +13,8 @@ PluginComponent {
     id: root
     pluginId: "claudeSwap"
 
+    ClaudeSwapLogic { id: logic }
+
     readonly property int warnPct: 70
     readonly property int critPct: 90
 
@@ -25,11 +27,6 @@ PluginComponent {
         if (pluginService) pluginService.savePluginData(pluginId, "threshold", String(t))
     }
 
-    readonly property string home: Quickshell.env("HOME")
-    // uv and pipx install into ~/.local/bin, which is often missing from the session PATH.
-    readonly property string pathPrefix: 'export PATH="$HOME/.local/bin:$PATH"; '
-    // Terminal for the add-account login; "sh -c ..." is appended.
-    readonly property var terminalCmd: (pluginData.terminal || "alacritty -e").trim().split(/\s+/)
     // One widget instance exists per bar/screen; this lock keeps a single `cswap auto` running.
     readonly property string lockPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/dms-claude-swap-auto.lock"
 
@@ -43,22 +40,16 @@ PluginComponent {
 
     readonly property var active: accounts.find(a => a.number === activeNumber) || null
 
-    function label(a) {
-        if (!a) return "?"
-        if (typeof a !== "object") return String(a)
-        return a.alias || a.email || ("#" + a.number)
+    function label(a) { return logic.label(a) }
+    function usageOf(a) { return logic.usageOf(a) }
+    function pct(w) { return logic.pct(w) }
+    function color(p) {
+        const l = logic.level(p, warnPct, critPct)
+        return l === "crit" ? Theme.error : l === "warn" ? Theme.warning : Theme.primary
     }
-    function usageOf(a) { return a ? (a.usage || a.lastGoodUsage || null) : null }
-    function pct(w) { return w && w.pct !== null && w.pct !== undefined ? Math.round(w.pct) : -1 }
-    function color(p) { return p >= critPct ? Theme.error : p >= warnPct ? Theme.warning : Theme.primary }
     function countdown(iso) {
-        if (!iso) return ""
-        let s = Math.floor(Date.parse(iso) / 1000) - now
-        if (s <= 0) return I18n.trFor("claudeSwap", "now")
-        const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60)
-        if (d > 0) return d + "d " + h + "h"
-        if (h > 0) return h + "h " + m + "m"
-        return Math.max(1, m) + "m"
+        const c = logic.countdown(iso, now)
+        return c === null ? I18n.trFor("claudeSwap", "now") : c
     }
     function summary(a) {
         const u = usageOf(a)
@@ -72,48 +63,42 @@ PluginComponent {
 
     // ---- cswap ----
     function run(id, args, cb) {
-        Proc.runCommand(id, ["sh", "-c", pathPrefix + 'command -v cswap >/dev/null || exit 127; exec cswap "$@"', "sh"].concat(args), cb, 0, 60000)
+        Proc.runCommand(id, logic.runCommand(args), cb, 0, 60000)
     }
 
     function refresh() {
         run("claudeSwap.list", ["list", "--json"], function (out, code) {
             root.loaded = true
-            root.installed = code !== 127
-            if (code === 127) return
-            try {
-                const o = JSON.parse(out)
-                if (o.error) { root.lastError = o.error.message || I18n.trFor("claudeSwap", "cswap error"); return }
-                root.accounts = o.accounts || []
-                root.activeNumber = o.activeAccountNumber !== undefined && o.activeAccountNumber !== null ? o.activeAccountNumber : -1
-                root.lastError = ""
-            } catch (e) {
-                root.lastError = I18n.trFor("claudeSwap", "unexpected output from cswap list")
-            }
+            root.installed = code !== logic.exitMissing
+            if (!root.installed) return
+            const r = logic.parseList(out)
+            if (r.error === "cswap") { root.lastError = r.message || I18n.trFor("claudeSwap", "cswap error"); return }
+            if (r.error) { root.lastError = I18n.trFor("claudeSwap", "unexpected output from cswap list"); return }
+            root.accounts = r.accounts
+            root.activeNumber = r.activeNumber
+            root.lastError = ""
         })
     }
 
     function switchTo(target) {
         if (busy) return
         busy = true
-        const args = target === "best" ? ["switch", "--strategy", "best", "--json"] : ["switch", String(target), "--json"]
-        run("claudeSwap.switch", args, function (out, code) {
+        run("claudeSwap.switch", logic.switchArgs(target), function (out, code) {
             root.busy = false
-            try {
-                const o = JSON.parse(out)
-                if (o.switched) ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: now on %1").arg(root.label(o.to)))
-                else ToastService.showWarning(I18n.trFor("claudeSwap", "Claude: did not switch — %1").arg(o.reason || (o.error && o.error.message) || I18n.trFor("claudeSwap", "no account available")))
-            } catch (e) {
+            const r = logic.parseSwitch(out)
+            if (!r.ok)
                 ToastService.showError(I18n.trFor("claudeSwap", "Claude: failed to switch account"))
-            }
+            else if (r.switched)
+                ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: now on %1").arg(root.label(r.to)))
+            else
+                ToastService.showWarning(I18n.trFor("claudeSwap", "Claude: did not switch — %1").arg(r.reason || I18n.trFor("claudeSwap", "no account available")))
             root.refresh()
         })
     }
 
     // `claude auth login` does not log out, so saved accounts keep valid tokens.
     function addAccount() {
-        const script = 'echo "$1"; echo; claude auth login && cswap add && echo && echo "$2" || echo "$3"; '
-            + 'echo; printf "%s" "$4"; read x'
-        Quickshell.execDetached(terminalCmd.concat(["sh", "-c", pathPrefix + script, "sh",
+        Quickshell.execDetached(logic.addAccountCommand(pluginData.terminal, [
             I18n.trFor("claudeSwap", "Sign in with the NEW account in your browser."),
             I18n.trFor("claudeSwap", "Account added."),
             I18n.trFor("claudeSwap", "Failed."),
@@ -135,12 +120,11 @@ PluginComponent {
 
     // ---- auto switch ----
     function onAutoEvent(line) {
-        let ev
-        try { ev = JSON.parse(line) } catch (e) { return }
-        if (ev.event === "switch") {
+        const ev = logic.parseAutoEvent(line)
+        if (ev.kind === "switch") {
             ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: quota limit reached, switched to %1").arg(label(ev.to)))
             refresh()
-        } else if (ev.event === "all-exhausted") {
+        } else if (ev.kind === "exhausted") {
             ToastService.showWarning(I18n.trFor("claudeSwap", "Claude: all accounts exhausted"))
         }
     }
@@ -157,12 +141,10 @@ PluginComponent {
 
     Process {
         id: autoProc
-        // exec keeps the lock fd on cswap itself, so stopping the process releases the lock.
-        command: ["sh", "-c", root.pathPrefix + 'exec 9>"$1"; flock -n 9 || exit 75; exec cswap auto --json --threshold "$2"',
-                  "sh", root.lockPath, String(root.threshold)]
+        command: logic.autoCommand(root.lockPath, root.threshold)
         stdout: SplitParser { onRead: data => root.onAutoEvent(data) }
-        // 75 = lock busy (another instance, or the previous one still exiting after a reload).
-        onExited: (code, status) => { if (code === 75 && root.autoOn) lockRetry.restart() }
+        // Lock busy: another instance, or the previous one still exiting after a reload.
+        onExited: (code, status) => { if (code === logic.exitLocked && root.autoOn) lockRetry.restart() }
     }
     Timer { id: lockRetry; interval: 3000; onTriggered: root.syncAuto() }
 
@@ -175,7 +157,7 @@ PluginComponent {
     // ---- bar ----
     component AutoIcon: DankIcon {
         name: root.autoOn ? "sync" : "sync_disabled"
-        size: Theme.fontSizeMedium + 2
+        size: root.iconSize
         color: root.autoOn ? Theme.primary : Theme.surfaceVariantText
     }
 

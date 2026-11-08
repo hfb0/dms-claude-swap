@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "activeAccountNumber": 1,
+  "accounts": [
+    { "number": 1, "email": "work@example.com", "active": true, "usageStatus": "ok",
+      "plan": { "label": "Team" },
+      "usage": { "fiveHour": { "pct": 15.4, "resetsAt": "2026-11-08T17:00:00Z" },
+                 "sevenDay": { "pct": 99.0, "resetsAt": "2026-11-11T15:00:00Z" } } },
+    { "number": 2, "email": "personal@example.com", "alias": "home", "active": false, "usageStatus": "unavailable",
+      "plan": { "label": "Max 5x" },
+      "lastGoodUsage": { "fiveHour": { "pct": null, "resetsAt": null },
+                         "sevenDay": { "pct": 0.0, "resetsAt": "2026-11-14T11:00:00Z" } } }
+  ]
+}
