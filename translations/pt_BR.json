@@ -1,0 +1,104 @@
+{
+  "100% (when exhausted)": {
+    "100% (when exhausted)": "100% (quando esgotar)"
+  },
+  "5h": {
+    "5h": "5h"
+  },
+  "5h %1% · resets in %2": {
+    "5h %1% · resets in %2": "5h %1% · reinicia em %2"
+  },
+  "Account added.": {
+    "Account added.": "Conta adicionada."
+  },
+  "Add account": {
+    "Add account": "Adicionar conta"
+  },
+  "At limit": {
+    "At limit": "Esgotar"
+  },
+  "Auto switch": {
+    "Auto switch": "Troca automática"
+  },
+  "Auto switch threshold": {
+    "Auto switch threshold": "Limite da troca automática"
+  },
+  "Claude Accounts": {
+    "Claude Accounts": "Contas do Claude"
+  },
+  "Claude: all accounts exhausted": {
+    "Claude: all accounts exhausted": "Claude: todas as contas esgotadas"
+  },
+  "Claude: did not switch — %1": {
+    "Claude: did not switch — %1": "Claude: não trocou — %1"
+  },
+  "Claude: failed to switch account": {
+    "Claude: failed to switch account": "Claude: falha ao trocar de conta"
+  },
+  "Claude: now on %1": {
+    "Claude: now on %1": "Claude: agora em %1"
+  },
+  "Claude: quota limit reached, switched to %1": {
+    "Claude: quota limit reached, switched to %1": "Claude: cota no limite, trocou para %1"
+  },
+  "Command used to sign in a new account (`sh -c ...` is appended)": {
+    "Command used to sign in a new account (`sh -c ...` is appended)": "Comando usado para o login de uma conta nova (recebe `sh -c ...` no fim)"
+  },
+  "Failed.": {
+    "Failed.": "Falhou."
+  },
+  "No accounts yet. Run `cswap add`, /login with the other account, then run `cswap add` again.": {
+    "No accounts yet. Run `cswap add`, /login with the other account, then run `cswap add` again.": "Nenhuma conta cadastrada. Rode `cswap add`, faça /login na outra conta e `cswap add` de novo."
+  },
+  "Press Enter to close": {
+    "Press Enter to close": "Enter para fechar"
+  },
+  "Refresh": {
+    "Refresh": "Atualizar"
+  },
+  "Runs `cswap auto` while the shell is running": {
+    "Runs `cswap auto` while the shell is running": "Roda o `cswap auto` enquanto o DMS estiver aberto"
+  },
+  "Sign in with the NEW account in your browser.": {
+    "Sign in with the NEW account in your browser.": "Faça login com a conta NOVA no navegador."
+  },
+  "Switch accounts when the active account's quota reaches this point": {
+    "Switch accounts when the active account's quota reaches this point": "Troca de conta quando a cota da conta ativa chega neste ponto"
+  },
+  "Switch to the account with the most quota left": {
+    "Switch to the account with the most quota left": "Trocar para a conta com mais cota"
+  },
+  "Terminal": {
+    "Terminal": "Terminal"
+  },
+  "Week": {
+    "Week": "Semana"
+  },
+  "claude-swap is not installed. Run: uv tool install claude-swap": {
+    "claude-swap is not installed. Run: uv tool install claude-swap": "claude-swap não instalado. Rode: uv tool install claude-swap"
+  },
+  "cswap error": {
+    "cswap error": "erro no cswap"
+  },
+  "install cswap": {
+    "install cswap": "instalar cswap"
+  },
+  "no account available": {
+    "no account available": "nenhuma conta disponível"
+  },
+  "no reading": {
+    "no reading": "sem leitura"
+  },
+  "no reading (%1)": {
+    "no reading (%1)": "sem leitura (%1)"
+  },
+  "now": {
+    "now": "agora"
+  },
+  "unexpected output from cswap list": {
+    "unexpected output from cswap list": "saída inesperada do cswap list"
+  },
+  "week %1%": {
+    "week %1%": "semana %1%"
+  }
+}
