@@ -403,7 +403,7 @@ PluginComponent {
                         radius: Theme.cornerRadius
                         color: isActive ? Theme.surfaceContainerHighest
                              : area.containsMouse ? Theme.surfaceHover : Theme.surfaceContainerHigh
-                        border.width: isActive ? 1 : 0
+                        border.width: isActive ? Theme.outlineWidth : 0
                         border.color: Theme.primary
                         opacity: modelData.disabled ? 0.5 : 1
 

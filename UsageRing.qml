@@ -8,8 +8,8 @@ Item {
     id: root
     property int percentage: 0          // 0..100
     property color ringColor: Theme.primary
-    property int diameter: 16
-    property real thickness: 2.5
+    property real diameter: Theme.iconSizeSmall
+    property real thickness: Math.max(Theme.outlineWidthFocused, diameter / 6.4)
 
     implicitWidth: diameter
     implicitHeight: diameter
