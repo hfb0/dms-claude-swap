@@ -20,5 +20,9 @@
     "settings_read",
     "settings_write",
     "process"
+  ],
+  "screenshot": "https://raw.githubusercontent.com/hfb0/dms-claude-swap/main/docs/screenshot.png",
+  "screenshots": [
+    "https://raw.githubusercontent.com/hfb0/dms-claude-swap/main/docs/screenshot.png"
   ]
 }

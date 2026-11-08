@@ -2,6 +2,8 @@
 
 A DankMaterialShell bar widget for people who use **more than one Claude Code account**. It shows each account's usage, switches accounts with one click, and can switch on its own when the active account runs out of quota. Account handling is done by [claude-swap](https://github.com/realiti4/claude-swap) (`cswap`).
 
+![Claude Swap popout](docs/screenshot.png)
+
 ## Features
 
 - **Bar:** 5-hour and weekly usage rings for the active account, plus an icon showing whether auto switch is on.
