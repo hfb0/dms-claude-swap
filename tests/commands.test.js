@@ -36,6 +36,25 @@ test('arguments reach cswap unchanged', () => {
     assert.equal(r.stdout.trim(), 'args:switch a b --json');
 });
 
+test('opening the lock does not truncate an existing file', async () => {
+    const { home, env } = sandbox(true);
+    const lock = path.join(home, 'precious.txt');
+    fs.writeFileSync(lock, 'keep me');
+    const p = spawn(...(c => [c[0], c.slice(1)])(L.autoCommand(lock, 99.9)), { env });
+    await new Promise(r => setTimeout(r, 300));
+    p.kill('SIGTERM');
+    await new Promise(r => p.on('exit', r));
+    assert.equal(fs.readFileSync(lock, 'utf8'), 'keep me');
+});
+
+test('shell metacharacters in arguments stay literal', () => {
+    const { home, env } = sandbox(true);
+    const marker = path.join(home, 'pwned');
+    const r = run(L.runCommand(['switch', '$(touch ' + marker + ')', '; touch ' + marker]), env);
+    assert.equal(r.status, 0);
+    assert.equal(fs.existsSync(marker), false);
+});
+
 test('auto loop: one instance holds the lock, it is released on SIGTERM', async () => {
     const { home, env } = sandbox(true);
     const lock = path.join(home, 'auto.lock');

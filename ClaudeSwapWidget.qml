@@ -20,7 +20,7 @@ PluginComponent {
 
     readonly property bool autoOn: pluginData.autoSwap === true
     // cswap accepts 50–99.9 and rejects 100, so 99.9 stands in for "when exhausted".
-    readonly property real threshold: parseFloat(pluginData.threshold) || 99.9
+    readonly property real threshold: logic.clampThreshold(pluginData.threshold)
     readonly property var thresholdOptions: [80, 90, 95, 99.9]
     function thresholdLabel(t) { return t >= 99.9 ? "100%" : t + "%" }
     function setThreshold(t) {
@@ -28,7 +28,7 @@ PluginComponent {
     }
 
     // One widget instance exists per bar/screen; this lock keeps a single `cswap auto` running.
-    readonly property string lockPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/dms-claude-swap-auto.lock"
+    readonly property string lockPath: logic.lockFile(Quickshell.env("XDG_RUNTIME_DIR"), Quickshell.env("HOME"))
 
     property var accounts: []
     property int activeNumber: -1
@@ -380,6 +380,7 @@ PluginComponent {
                                     anchors.rightMargin: Theme.spacingS
                                     anchors.verticalCenter: parent.verticalCenter
                                     wrapMode: Text.NoWrap
+                                    textFormat: Text.PlainText
                                     elide: Text.ElideMiddle
                                     text: acct.modelData.alias || acct.modelData.email || ("#" + acct.modelData.number)
                                     font.weight: acct.isActive ? Font.Medium : Font.Normal
@@ -396,6 +397,7 @@ PluginComponent {
                                     StyledText {
                                         id: planText
                                         anchors.centerIn: parent
+                                        textFormat: Text.PlainText
                                         text: acct.modelData.plan ? acct.modelData.plan.label : ""
                                         font.pixelSize: Theme.fontSizeSmall - 1
                                         color: Theme.surfaceVariantText

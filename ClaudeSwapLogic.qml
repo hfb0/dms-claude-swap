@@ -16,9 +16,22 @@ QtObject {
         return ["sh", "-c", pathPrefix + 'command -v cswap >/dev/null || exit 127; exec cswap "$@"', "sh"].concat(args)
     }
 
+    // Lock lives in the private runtime dir; ~/.cache is the fallback, never a shared /tmp.
+    function lockFile(runtimeDir, home) {
+        return (runtimeDir ? runtimeDir : home + "/.cache") + "/dms-claude-swap-auto.lock"
+    }
+
+    // cswap accepts 50–99.9; anything else (or garbage) falls back to 99.9.
+    function clampThreshold(t) {
+        var n = parseFloat(t)
+        if (isNaN(n)) return 99.9
+        return Math.min(99.9, Math.max(50, n))
+    }
+
     // exec keeps the lock fd on cswap itself, so stopping the process releases the lock.
+    // `>>` opens without truncating, so a pre-existing file at the path is left intact.
     function autoCommand(lockPath, threshold) {
-        return ["sh", "-c", pathPrefix + 'exec 9>"$1"; flock -n 9 || exit 75; exec cswap auto --json --threshold "$2"',
+        return ["sh", "-c", pathPrefix + 'exec 9>>"$1"; flock -n 9 || exit 75; exec cswap auto --json --threshold "$2"',
                 "sh", lockPath, String(threshold)]
     }
 

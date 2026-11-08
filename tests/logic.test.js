@@ -68,6 +68,20 @@ test('parseAutoEvent keeps only switch and all-exhausted', () => {
     assert.equal(L.parseAutoEvent('{oops').kind, null);
 });
 
+test('clampThreshold keeps cswap\'s accepted range', () => {
+    assert.equal(L.clampThreshold('90'), 90);
+    assert.equal(L.clampThreshold('100'), 99.9);
+    assert.equal(L.clampThreshold(10), 50);
+    assert.equal(L.clampThreshold('x; rm -rf ~'), 99.9);
+    assert.equal(L.clampThreshold(undefined), 99.9);
+});
+
+test('lockFile never falls back to a shared /tmp', () => {
+    assert.equal(L.lockFile('/run/user/1000', '/home/u'), '/run/user/1000/dms-claude-swap-auto.lock');
+    assert.equal(L.lockFile('', '/home/u'), '/home/u/.cache/dms-claude-swap-auto.lock');
+    assert.equal(L.lockFile(undefined, '/home/u'), '/home/u/.cache/dms-claude-swap-auto.lock');
+});
+
 test('switchArgs and addAccountCommand', () => {
     assert.deepEqual(L.switchArgs('best'), ['switch', '--strategy', 'best', '--json']);
     assert.deepEqual(L.switchArgs(2), ['switch', '2', '--json']);
