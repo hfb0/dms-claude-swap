@@ -6,7 +6,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Common
 import qs.Services
-import qs.Widgets
+import qs.DCommon.Widgets
 import qs.Modules.Plugins
 
 PluginComponent {
@@ -155,7 +155,7 @@ PluginComponent {
     Timer { interval: 30000; running: true; repeat: true; onTriggered: root.now = Math.floor(Date.now() / 1000) }
 
     // ---- bar ----
-    component AutoIcon: DankIcon {
+    component AutoIcon: DIcon {
         name: root.autoOn ? "sync" : "sync_disabled"
         size: root.iconSize
         color: root.autoOn ? Theme.primary : Theme.surfaceVariantText
@@ -299,7 +299,7 @@ PluginComponent {
             headerActions: Component {
                 Row {
                     spacing: Theme.spacingXS
-                    DankActionButton {
+                    DActionButton {
                         iconName: "person_add"
                         iconColor: Theme.surfaceVariantText
                         buttonSize: 28
@@ -308,7 +308,7 @@ PluginComponent {
                         enabled: root.installed
                         onClicked: { root.closePopout(); root.addAccount() }
                     }
-                    DankActionButton {
+                    DActionButton {
                         iconName: "bolt"
                         iconColor: Theme.surfaceVariantText
                         buttonSize: 28
@@ -317,7 +317,7 @@ PluginComponent {
                         enabled: root.installed && !root.busy && root.accounts.length > 1
                         onClicked: root.switchTo("best")
                     }
-                    DankActionButton {
+                    DActionButton {
                         iconName: "refresh"
                         iconColor: Theme.surfaceVariantText
                         buttonSize: 28
@@ -365,7 +365,7 @@ PluginComponent {
                             Item {
                                 width: parent.width
                                 height: 22
-                                DankIcon {
+                                DIcon {
                                     id: radio
                                     anchors.left: parent.left
                                     anchors.verticalCenter: parent.verticalCenter
@@ -446,7 +446,7 @@ PluginComponent {
                         Item {
                             width: parent.width
                             height: Math.max(autoTitle.implicitHeight, autoToggle.height)
-                            DankIcon {
+                            DIcon {
                                 id: autoIcon
                                 anchors.left: parent.left
                                 anchors.verticalCenter: parent.verticalCenter
@@ -462,7 +462,7 @@ PluginComponent {
                                 text: I18n.trFor("claudeSwap", "Auto switch")
                                 font.weight: Font.Medium
                             }
-                            DankToggle {
+                            DToggle {
                                 id: autoToggle
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter

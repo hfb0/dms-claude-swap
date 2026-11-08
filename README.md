@@ -16,7 +16,7 @@ Auto switch runs `cswap auto` as a process owned by the shell, so no systemd uni
 
 ## Requirements
 
-- DankMaterialShell
+- DankMaterialShell 2.1.0 or newer
 - [claude-swap](https://github.com/realiti4/claude-swap): `uv tool install claude-swap`
 - `flock` (util-linux)
 - A terminal for the add-account flow. The default is `alacritty -e`; change it in the plugin settings.
