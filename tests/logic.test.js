@@ -224,3 +224,35 @@ test('labelFor resolves cswap\'s {number, email} refs to the alias', () => {
     assert.equal(L.labelFor({ number: 9, email: 'new@x.com' }, accounts), 'new@x.com');
     assert.equal(L.labelFor(null, accounts), '?');
 });
+
+// ---- per-model limits (scoped) ----
+test('scopedWindows lists per-model limits that have a reading', () => {
+    const fable = { name: 'Fable', pct: 100, resetsAt: RESET };
+    assert.deepEqual(L.scopedWindows({ scoped: [fable] }), [{ name: 'Fable', win: fable }]);
+    assert.deepEqual(L.scopedWindows({ scoped: [{ name: 'Opus', pct: null }, { pct: 5 }, null] }), []);
+    assert.deepEqual(L.scopedWindows({}), []);
+    assert.deepEqual(L.scopedWindows(null), []);
+});
+
+test('usageAlerts covers per-model limits with their own state', () => {
+    const opts = { levels: true, pace: false };
+    const a = { number: 1, usage: { sevenDay: { pct: 10, resetsAt: RESET }, scoped: [{ name: 'Fable', pct: 96, resetsAt: RESET }] } };
+    let r = L.usageAlerts(a, {}, opts, NOW);
+    assert.deepEqual(r.alerts.map(x => [x.window, x.model, x.level]), [['scoped:Fable', 'Fable', 95]]);
+    r = L.usageAlerts(a, r.sent, opts, NOW);
+    assert.equal(r.alerts.length, 0, 'fires once per cycle');
+    const week = L.usageAlerts({ number: 1, usage: { sevenDay: { pct: 96, resetsAt: RESET } } }, r.sent, opts, NOW);
+    assert.deepEqual(week.alerts.map(x => x.window), ['sevenDay'], 'weekly state is separate');
+});
+
+test('tightest ignores per-model limits', () => {
+    assert.equal(L.tightest({ fiveHour: { pct: 3 }, sevenDay: { pct: 2 }, scoped: [{ name: 'Fable', pct: 100 }] }).pct, 3);
+});
+
+test('scopedWindows accepts the array-like lists Qt hands back from shared state', () => {
+    // Values stored in PluginService.globalVars come back as QVariantList, for which
+    // Array.isArray() is false; they still have indices and a length.
+    const fable = { name: 'Fable', pct: 100, resetsAt: RESET };
+    assert.deepEqual(L.scopedWindows({ scoped: { 0: fable, length: 1 } }), [{ name: 'Fable', win: fable }]);
+    assert.deepEqual(L.scopedWindows({ scoped: 'Fable' }), []);
+});

@@ -164,6 +164,21 @@ QtObject {
         return n + "|" + name + "|" + resetBucket(w)
     }
 
+    // Per-model weekly limits (cswap's `scoped`, e.g. Fable) that have a reading.
+    // Model names never contain "|", which windowKey uses as a separator.
+    // Lists read back from PluginService.globalVars are QVariantLists, not JS arrays
+    // (Array.isArray is false), so anything with a numeric length is accepted.
+    function scopedWindows(u) {
+        var out = []
+        var list = u && u.scoped && typeof u.scoped === "object" && typeof u.scoped.length === "number" ? u.scoped : []
+        for (var i = 0; i < list.length; i++) {
+            var w = list[i]
+            if (w && typeof w.name === "string" && w.name && w.name.indexOf("|") < 0 && typeof w.pct === "number")
+                out.push({ name: w.name, win: w })
+        }
+        return out
+    }
+
     // Alerts for the active account. `sent` maps windowKey -> highest level already
     // notified (and windowKey + "|pace" -> 1); it is returned updated, with the
     // cycles that have already reset dropped. Only fresh readings count: an alert
@@ -179,8 +194,15 @@ QtObject {
         var alerts = []
         var top = alertLevels[alertLevels.length - 1]
         var u = acct.usage || {}
-        for (var i = 0; i < alertWindows.length; i++) {
-            var name = alertWindows[i], w = u[name]
+        // Account-wide windows, then per-model ones ("scoped:Fable"), each with its own state.
+        var entries = []
+        for (var i = 0; i < alertWindows.length; i++)
+            entries.push({ name: alertWindows[i], w: u[alertWindows[i]], model: "" })
+        var sc = scopedWindows(u)
+        for (var s = 0; s < sc.length; s++)
+            entries.push({ name: "scoped:" + sc[s].name, w: sc[s].win, model: sc[s].name })
+        for (var e = 0; e < entries.length; e++) {
+            var name = entries[e].name, w = entries[e].w, model = entries[e].model
             if (!w || typeof w.pct !== "number" || resetBucket(w) < 0) continue
             var key = windowKey(acct.number, name, w)
             if (opts.levels) {
@@ -188,11 +210,12 @@ QtObject {
                 for (var j = 0; j < alertLevels.length; j++)
                     if (w.pct >= alertLevels[j]) hit = alertLevels[j]
                 if (hit > (next[key] || 0)) {
-                    alerts.push({ kind: "level", window: name, level: hit, pct: Math.round(w.pct), resetsAt: w.resetsAt })
+                    alerts.push({ kind: "level", window: name, model: model, level: hit, pct: Math.round(w.pct), resetsAt: w.resetsAt })
                     next[key] = hit
                 }
             }
-            var p = pace(w)
+            // Pace alerts stay account-wide: their text speaks of the weekly limit.
+            var p = model ? null : pace(w)
             if (opts.pace && p && p.ahead && w.willLastToReset === false && w.pct < top && !next[key + "|pace"]) {
                 alerts.push({ kind: "pace", window: name, pct: Math.round(w.pct), expected: Math.round(p.expected), resetsAt: w.resetsAt })
                 next[key + "|pace"] = 1

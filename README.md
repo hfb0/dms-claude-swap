@@ -51,8 +51,8 @@ manually disables automatic switching.
 <td width="50%" valign="top">
 
 **Manual switching**<br />
-One card per account with plan, 5-hour usage and weekly usage. Click a card to make that account
-active. Running Claude Code sessions use the new account from their next request.
+One card per account with plan, 5-hour usage, weekly usage and per-model weekly limits such as
+Fable, when the account has them. Click a card to make that account active. Running Claude Code sessions use the new account from their next request.
 
 </td>
 </tr>
@@ -60,15 +60,16 @@ active. Running Claude Code sessions use the new account from their next request
 <td valign="top">
 
 **Usage pace**<br />
-A marker on the weekly bar shows the expected usage at a linear pace. A warning is shown when the
-account is far enough ahead of that pace to run out before the reset.
+A marker on the weekly bars shows the expected usage at a linear pace, and a runner icon with
+"Ahead of pace" appears next to the account name when it is far enough ahead to run out before the reset. Hover a bar for
+the numbers. Can be turned off in the settings (gear button at the top of the popout).
 
 </td>
 <td valign="top">
 
 **Usage alerts**<br />
-Desktop notifications when the active account reaches 75%, 85% and 95% of a limit, and when it is
-ahead of pace. Each alert fires once per reset cycle and replaces the previous one.
+Desktop notifications when the active account reaches 75%, 85% and 95% of a limit (per-model
+limits included), and when it is ahead of pace. Each alert fires once per reset cycle and replaces the previous one.
 
 </td>
 </tr>

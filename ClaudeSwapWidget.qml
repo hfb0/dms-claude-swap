@@ -65,6 +65,14 @@ PluginComponent {
         const l = logic.level(p, warnPct, critPct)
         return l === "crit" ? Theme.error : l === "warn" ? Theme.warning : Theme.primary
     }
+    // Pace display can be turned off in the settings (pace alerts have their own toggle).
+    readonly property bool showPace: pluginData.showPace !== false
+    function paceText(pace) {
+        // Kept short: the tooltip is one line, and the marker already shows the expected usage.
+        return pace.ahead
+            ? I18n.trFor("claudeSwap", "+%1 pts vs pace").arg(pace.delta)
+            : I18n.trFor("claudeSwap", "On pace")
+    }
     function countdown(iso) {
         const c = logic.countdown(iso, now)
         return c === null ? I18n.trFor("claudeSwap", "now") : c
@@ -124,8 +132,10 @@ PluginComponent {
     readonly property bool levelAlertsOn: pluginData.alerts !== false
     readonly property bool paceAlertsOn: pluginData.paceAlerts !== false
 
-    function windowName(name) {
-        return name === "fiveHour" ? I18n.trFor("claudeSwap", "5-hour") : I18n.trFor("claudeSwap", "weekly")
+    // Name of an alert's window for the notification text.
+    function windowName(a) {
+        if (a.model) return I18n.trFor("claudeSwap", "%1 weekly").arg(a.model)
+        return a.window === "fiveHour" ? I18n.trFor("claudeSwap", "5-hour") : I18n.trFor("claudeSwap", "weekly")
     }
 
     function checkAlerts(acct) {
@@ -137,7 +147,7 @@ PluginComponent {
             const reset = countdown(a.resetsAt)
             if (a.kind === "level")
                 Quickshell.execDetached(logic.notifyCommand(
-                    I18n.trFor("claudeSwap", "Claude: %1% of the %2 limit used").arg(a.pct).arg(windowName(a.window)),
+                    I18n.trFor("claudeSwap", "Claude: %1% of the %2 limit used").arg(a.pct).arg(windowName(a)),
                     I18n.trFor("claudeSwap", "%1 · resets in %2").arg(label(acct)).arg(reset),
                     a.level >= 95 ? "critical" : "normal",
                     "claudeSwap-" + acct.number + "-" + a.window))
@@ -370,8 +380,21 @@ PluginComponent {
         property string name: ""
         property var win: null
         readonly property int p: root.pct(win)
+        readonly property var pace: root.showPace ? logic.pace(win) : null
         width: parent ? parent.width : 0
         height: barValue.implicitHeight
+
+        // Hovering a row with pace explains the marker.
+        HoverHandler {
+            id: barHover
+            onHoveredChanged: if (hovered && bar.pace) paceTip.present(400); else paceTip.dismiss()
+        }
+        DTooltipHost {
+            id: paceTip
+            target: bar
+            side: "top"
+            text: bar.pace ? root.paceText(bar.pace) : ""
+        }
 
         StyledText {
             id: barName
@@ -400,7 +423,7 @@ PluginComponent {
             }
             // Where usage would be at an even pace (weekly windows only).
             Rectangle {
-                readonly property var pace: logic.pace(bar.win)
+                readonly property var pace: bar.pace
                 visible: pace !== null
                 x: pace ? Math.max(0, Math.min(parent.width - width, parent.width * pace.expected / 100 - width / 2)) : 0
                 anchors.verticalCenter: parent.verticalCenter
@@ -475,6 +498,14 @@ PluginComponent {
                         tooltipSide: "bottom"
                         enabled: root.installed
                         onClicked: { root.closePopout(); root.addAccount() }
+                    }
+                    DActionButton {
+                        iconName: "settings"
+                        iconColor: Theme.surfaceVariantText
+                        buttonSize: Theme.buttonHeightXXS
+                        tooltipText: I18n.trFor("claudeSwap", "Settings")
+                        tooltipSide: "bottom"
+                        onClicked: { root.closePopout(); PopoutService.openSettingsWithTab("plugin:claudeSwap") }
                     }
                     DActionButton {
                         iconName: "refresh"
@@ -673,15 +704,39 @@ PluginComponent {
                                     id: accountName
                                     anchors.left: radio.right
                                     anchors.leftMargin: Theme.spacingS
-                                    anchors.right: editButton.left
-                                    anchors.rightMargin: Theme.spacingXS
                                     anchors.verticalCenter: parent.verticalCenter
+                                    // Only as wide as the name, leaving room for the pace status after it.
+                                    width: Math.max(0, Math.min(implicitWidth,
+                                        editButton.x - Theme.spacingXS - x - (paceTag.visible ? paceTag.implicitWidth + Theme.spacingXS : 0)))
                                     visible: !acct.editing
                                     wrapMode: Text.NoWrap
                                     textFormat: Text.PlainText
                                     elide: Text.ElideMiddle
                                     text: acct.modelData.alias || acct.modelData.email || ("#" + acct.modelData.number)
                                     font.weight: acct.isActive ? Font.Medium : Font.Normal
+                                }
+                                // Short status in the style of claude.ai's usage page, only when ahead.
+                                Row {
+                                    id: paceTag
+                                    readonly property var pace: root.showPace && acct.u ? logic.pace(acct.u.sevenDay) : null
+                                    visible: !acct.editing && !!pace && pace.ahead
+                                    anchors.left: accountName.right
+                                    anchors.leftMargin: Theme.spacingS
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: Theme.spacingXXS
+                                    DIcon {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        name: "directions_run"
+                                        size: Theme.iconSizeSmall
+                                        color: Theme.warning
+                                    }
+                                    StyledText {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        wrapMode: Text.NoWrap
+                                        text: I18n.trFor("claudeSwap", "Ahead of pace")
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        color: Theme.warning
+                                    }
                                 }
                                 DTextField {
                                     id: aliasField
@@ -754,14 +809,14 @@ PluginComponent {
                                 visible: !!acct.u
                                 UsageBar { name: I18n.trFor("claudeSwap", "5h"); win: acct.u ? acct.u.fiveHour : null }
                                 UsageBar { name: I18n.trFor("claudeSwap", "Week"); win: acct.u ? acct.u.sevenDay : null }
-                                StyledText {
-                                    readonly property var pace: logic.pace(acct.u ? acct.u.sevenDay : null)
-                                    visible: !!pace && pace.ahead
-                                    width: parent.width
-                                    wrapMode: Text.WordWrap
-                                    text: pace ? I18n.trFor("claudeSwap", "%1 points ahead of pace (%2% expected by now)").arg(pace.delta).arg(Math.round(pace.expected)) : ""
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    color: Theme.warning
+                                // Per-model weekly limits (e.g. Fable), only when the account reports them.
+                                Repeater {
+                                    model: logic.scopedWindows(acct.u)
+                                    delegate: UsageBar {
+                                        required property var modelData
+                                        name: modelData.name
+                                        win: modelData.win
+                                    }
                                 }
                             }
                             StyledText {

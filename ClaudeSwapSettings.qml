@@ -37,6 +37,13 @@ PluginSettings {
         defaultValue: true
     }
 
+    ToggleSetting {
+        settingKey: "showPace"
+        label: I18n.trFor("claudeSwap", "Show pace")
+        description: I18n.trFor("claudeSwap", "Marker on weekly bars, \"Ahead of pace\" next to the account name, and an explanation on hover")
+        defaultValue: true
+    }
+
     SelectionSetting {
         settingKey: "barStyle"
         label: I18n.trFor("claudeSwap", "Bar style")
