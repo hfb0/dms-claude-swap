@@ -1,4 +1,5 @@
-// Adapted from DankClaudeUsage by Bogdan Velicu (MIT): https://github.com/bogdan-velicu/DankClaudeUsage
+// Adapted from DankClaudeUsage, Copyright (c) 2026 Bogdan Velicu, MIT License:
+// https://github.com/bogdan-velicu/DankClaudeUsage (full notice in THIRD_PARTY_NOTICES.md)
 // A small circular progress gauge. The percentage is shown beside it (by the
 // caller), not inside — it's unreadable at bar size.
 import QtQuick

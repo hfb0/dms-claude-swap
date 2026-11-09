@@ -15,17 +15,23 @@ PluginComponent {
 
     ClaudeSwapLogic { id: logic }
 
-    readonly property int warnPct: 70
-    readonly property int critPct: 90
+    // Colors follow the alert levels (75/85/95): yellow from the first alert, red from the urgent one.
+    readonly property int warnPct: logic.alertLevels[0]
+    readonly property int critPct: logic.alertLevels[logic.alertLevels.length - 1]
 
     readonly property bool autoOn: pluginData.autoSwap === true
     // cswap accepts 50–99.9 and rejects 100, so 99.9 stands in for "when exhausted".
     readonly property real threshold: logic.clampThreshold(pluginData.threshold)
-    readonly property var thresholdOptions: [80, 90, 95, 99.9]
+    // 100 is the "at limit" preset; clampThreshold hands cswap 99.9 for it.
+    readonly property var thresholdOptions: [80, 90, 95, 100]
     function thresholdLabel(t) { return t >= 99.9 ? "100%" : t + "%" }
     function setThreshold(t) {
         if (pluginService) pluginService.savePluginData(pluginId, "threshold", String(t))
     }
+    property bool editingThreshold: false
+    // One editor open at a time.
+    onEditingThresholdChanged: if (editingThreshold) editingNumber = -1
+    onEditingNumberChanged: if (editingNumber >= 0) editingThreshold = false
 
     // One widget instance exists per bar/screen. They elect a single owner through
     // PluginService.globalVars: only the owner polls cswap and runs the auto loop,
@@ -51,7 +57,8 @@ PluginComponent {
 
     readonly property var active: accounts.find(a => a.number === activeNumber) || null
 
-    function label(a) { return logic.label(a) }
+    // Always through the account list, so refs from cswap events show the alias too.
+    function label(a) { return logic.labelFor(a, accounts) }
     function usageOf(a) { return logic.usageOf(a) }
     function pct(w) { return logic.pct(w) }
     function color(p) {
@@ -106,9 +113,44 @@ PluginComponent {
                 root.publish({ loaded: true, installed: true, lastError: r.message || I18n.trFor("claudeSwap", "cswap error") })
             else if (r.error)
                 root.publish({ loaded: true, installed: true, lastError: I18n.trFor("claudeSwap", "unexpected output from cswap list") })
-            else
+            else {
                 root.publish({ loaded: true, installed: true, lastError: "", accounts: r.accounts, activeNumber: r.activeNumber })
+                root.checkAlerts(r.accounts.find(a => a.number === r.activeNumber) || null)
+            }
         })
+    }
+
+    // ---- usage alerts (owner only, so several bars do not notify twice) ----
+    readonly property bool levelAlertsOn: pluginData.alerts !== false
+    readonly property bool paceAlertsOn: pluginData.paceAlerts !== false
+
+    function windowName(name) {
+        return name === "fiveHour" ? I18n.trFor("claudeSwap", "5-hour") : I18n.trFor("claudeSwap", "weekly")
+    }
+
+    function checkAlerts(acct) {
+        if (!isOwner || !(levelAlertsOn || paceAlertsOn)) return
+        let sent = {}
+        try { sent = JSON.parse(pluginData.alertsSent || "{}") || {} } catch (e) {}
+        const r = logic.usageAlerts(acct, sent, { levels: levelAlertsOn, pace: paceAlertsOn }, Math.floor(Date.now() / 1000))
+        for (const a of r.alerts) {
+            const reset = countdown(a.resetsAt)
+            if (a.kind === "level")
+                Quickshell.execDetached(logic.notifyCommand(
+                    I18n.trFor("claudeSwap", "Claude: %1% of the %2 limit used").arg(a.pct).arg(windowName(a.window)),
+                    I18n.trFor("claudeSwap", "%1 · resets in %2").arg(label(acct)).arg(reset),
+                    a.level >= 95 ? "critical" : "normal",
+                    "claudeSwap-" + acct.number + "-" + a.window))
+            else
+                Quickshell.execDetached(logic.notifyCommand(
+                    I18n.trFor("claudeSwap", "Claude: weekly usage ahead of pace"),
+                    I18n.trFor("claudeSwap", "%1 · %2% used, %3% expected by now. At this rate it runs out before the reset in %4.")
+                        .arg(label(acct)).arg(a.pct).arg(a.expected).arg(reset),
+                    "normal",
+                    "claudeSwap-" + acct.number + "-" + a.window + "-pace"))
+        }
+        if (JSON.stringify(r.sent) !== JSON.stringify(sent) && pluginService)
+            pluginService.savePluginData(pluginId, "alertsSent", JSON.stringify(r.sent))
     }
 
     function switchTo(target) {
@@ -119,12 +161,44 @@ PluginComponent {
             const r = logic.parseSwitch(out)
             if (!r.ok)
                 ToastService.showError(I18n.trFor("claudeSwap", "Claude: failed to switch account"))
-            else if (r.switched)
+            else if (r.switched && root.autoOn) {
+                // A hand-picked account wins: the auto loop would otherwise switch away from it.
+                root.setAuto(false)
+                ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: now on %1. Auto switch turned off because you picked the account.").arg(root.label(r.to)))
+            } else if (r.switched)
                 ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: now on %1").arg(root.label(r.to)))
             else
                 ToastService.showWarning(I18n.trFor("claudeSwap", "Claude: did not switch — %1").arg(r.reason || I18n.trFor("claudeSwap", "no account available")))
             root.refresh()
         })
+    }
+
+    // ---- alias editing ----
+    property int editingNumber: -1
+
+    // "" when the alias can be saved, else the reason it cannot.
+    function aliasProblem(n, raw) {
+        const r = logic.normalizeAlias(raw)
+        if (r.error === "numeric") return I18n.trFor("claudeSwap", "Cannot be only numbers")
+        if (r.error === "dash") return I18n.trFor("claudeSwap", "Cannot start with '-'")
+        if (r.error === "chars") return I18n.trFor("claudeSwap", "Use only letters, digits, '-', '_' and '.'")
+        if (r.value && accounts.some(a => a.number !== n && a.alias === r.value))
+            return I18n.trFor("claudeSwap", "Another account already uses this name")
+        return ""
+    }
+
+    // Returns false when the input is invalid, so the field can stay open.
+    function saveAlias(acct, raw) {
+        if (aliasProblem(acct.number, raw)) return false
+        editingNumber = -1
+        const value = logic.normalizeAlias(raw).value
+        if (value === (acct.alias || "")) return true
+        run("claudeSwap.alias", logic.aliasArgs(acct.number, value), function (out, code) {
+            if (code !== 0)
+                ToastService.showError(I18n.trFor("claudeSwap", "Claude: could not rename the account"))
+            root.refresh()
+        })
+        return true
     }
 
     // The plugin setting overrides the terminal DMS resolves (its setting, then $TERMINAL).
@@ -196,7 +270,9 @@ PluginComponent {
     Component.onDestruction: {
         if (isOwner) publish({ owner: "" })
     }
-    onSharedChanged: if (!shared.owner) claimOwnership()
+    // Deferred: claiming writes globalVars, which `shared` is bound to, and doing that
+    // inside its own change handler is a binding loop.
+    onSharedChanged: if (!shared.owner) Qt.callLater(claimOwnership)
 
     Timer {
         interval: 60000; running: true; repeat: true
@@ -214,81 +290,75 @@ PluginComponent {
     Timer { interval: 30000; running: true; repeat: true; onTriggered: root.now = Math.floor(Date.now() / 1000) }
 
     // ---- bar ----
-    component AutoIcon: DIcon {
-        name: root.autoOn ? "sync" : "sync_disabled"
-        size: root.iconSize
-        color: root.autoOn ? Theme.primary : Theme.surfaceVariantText
+    // Compact: only the limit closest to running out. The logo is lit while auto switch is on.
+    readonly property bool compact: (pluginData.barStyle || "compact") === "compact"
+    readonly property var barWindows: {
+        const u = usageOf(active)
+        if (!u) return []
+        if (compact) {
+            const t = logic.tightest(u)
+            return t ? [t] : []
+        }
+        return [u.fiveHour, u.sevenDay].filter(w => pct(w) >= 0)
     }
 
-    horizontalBarPill: Component {
-        StyledRect {
-            id: pill
-            implicitWidth: row.implicitWidth + Theme.spacingM * 2
-            height: parent.widgetThickness
-            radius: Theme.cornerRadius
-            color: Theme.surfaceContainerHigh
+    component AutoIcon: SwapLogo {
+        size: root.iconSize
+        lit: root.autoOn
+    }
 
-            RowLayout {
-                id: row
-                anchors.centerIn: parent
-                spacing: Theme.spacingS
+    // DMS draws the pill background and padding; the bar content only brings icon and
+    // text, sized like the other bar widgets (iconSize / textSize from PluginComponent).
+    readonly property color barTextColor: Theme.widgetTextColor || Theme.surfaceText
+    // Plain text color while usage is fine, warning/error colors past warnPct/critPct.
+    function barColor(p) {
+        return p >= 0 && logic.level(p, warnPct, critPct) !== "ok" ? color(p) : barTextColor
+    }
 
-                AutoIcon { Layout.alignment: Qt.AlignVCenter }
+    horizontalBarPill: Row {
+        spacing: Theme.spacingXS
 
-                StyledText {
-                    visible: !root.active
-                    text: root.installed ? "✳ --" : "✳ " + I18n.trFor("claudeSwap", "install cswap")
-                    color: Theme.surfaceTextMedium
-                    font.pixelSize: Theme.fontSizeMedium
+        AutoIcon { anchors.verticalCenter: parent.verticalCenter }
+
+        StyledText {
+            visible: !root.active
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.installed ? "--" : I18n.trFor("claudeSwap", "install cswap")
+            color: root.barTextColor
+            font.pixelSize: root.textSize
+        }
+
+        Repeater {
+            model: root.barWindows
+            delegate: Row {
+                spacing: Theme.spacingXXS
+                anchors.verticalCenter: parent.verticalCenter
+                UsageRing {
+                    visible: !root.compact
+                    percentage: root.pct(modelData)
+                    ringColor: root.color(root.pct(modelData))
+                    diameter: root.iconSize - Theme.spacingXS
+                    anchors.verticalCenter: parent.verticalCenter
                 }
-
-                Repeater {
-                    model: {
-                        const u = root.usageOf(root.active)
-                        if (!u) return []
-                        return [u.fiveHour, u.sevenDay].filter(w => root.pct(w) >= 0)
-                    }
-                    delegate: Row {
-                        spacing: Theme.spacingXS
-                        Layout.alignment: Qt.AlignVCenter
-                        UsageRing {
-                            percentage: root.pct(modelData)
-                            ringColor: root.color(root.pct(modelData))
-                            diameter: Math.max(Theme.iconSizeSmall - Theme.spacingXS, Math.min(Theme.iconSizeSmall + Theme.spacingXXS, pill.height - Theme.spacingS))
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        StyledText {
-                            text: root.pct(modelData) + "%"
-                            color: Theme.surfaceText
-                            font.pixelSize: Theme.fontSizeMedium
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                    }
+                StyledText {
+                    text: root.pct(modelData) + "%"
+                    color: root.compact ? root.barColor(root.pct(modelData)) : root.barTextColor
+                    font.pixelSize: root.textSize
+                    anchors.verticalCenter: parent.verticalCenter
                 }
             }
         }
     }
 
-    verticalBarPill: Component {
-        StyledRect {
-            width: parent.widgetThickness
-            implicitHeight: col.implicitHeight + Theme.spacingM * 2
-            radius: Theme.cornerRadius
-            color: Theme.surfaceContainerHigh
-
-            Column {
-                id: col
-                anchors.centerIn: parent
-                spacing: Theme.spacingS
-                AutoIcon { anchors.horizontalCenter: parent.horizontalCenter }
-                StyledText {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    readonly property int p: root.pct(root.usageOf(root.active)?.fiveHour)
-                    text: p >= 0 ? p + "%" : "--"
-                    color: p >= 0 ? root.color(p) : Theme.surfaceTextMedium
-                    font.pixelSize: Theme.fontSizeSmall
-                }
-            }
+    verticalBarPill: Column {
+        spacing: Theme.spacingXS
+        AutoIcon { anchors.horizontalCenter: parent.horizontalCenter }
+        StyledText {
+            anchors.horizontalCenter: parent.horizontalCenter
+            readonly property int p: root.pct(root.compact ? logic.tightest(root.usageOf(root.active)) : root.usageOf(root.active)?.fiveHour)
+            text: p >= 0 ? p + "%" : "--"
+            color: root.barColor(p)
+            font.pixelSize: root.textSize
         }
     }
 
@@ -328,6 +398,17 @@ PluginComponent {
                 color: root.color(bar.p)
                 Behavior on width { NumberAnimation { duration: Theme.shortDuration } }
             }
+            // Where usage would be at an even pace (weekly windows only).
+            Rectangle {
+                readonly property var pace: logic.pace(bar.win)
+                visible: pace !== null
+                x: pace ? Math.max(0, Math.min(parent.width - width, parent.width * pace.expected / 100 - width / 2)) : 0
+                anchors.verticalCenter: parent.verticalCenter
+                width: Theme.outlineWidth * 2
+                height: parent.height + Theme.spacingXS * 2
+                radius: width / 2
+                color: Theme.surfaceText
+            }
         }
         StyledText {
             id: barValue
@@ -344,6 +425,31 @@ PluginComponent {
         }
     }
 
+    // One option of the threshold picker.
+    component Segment: StyledRect {
+        id: seg
+        property string label: ""
+        property bool sel: false
+        signal clicked
+        height: Theme.buttonHeightXXS
+        radius: Theme.cornerRadius
+        color: sel ? Theme.primary : segArea.containsMouse ? Theme.surfaceHover : "transparent"
+        StyledText {
+            anchors.centerIn: parent
+            text: seg.label
+            font.pixelSize: Theme.fontSizeSmall
+            font.weight: seg.sel ? Font.Medium : Font.Normal
+            color: seg.sel ? Theme.surface : Theme.surfaceVariantText
+        }
+        MouseArea {
+            id: segArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: seg.clicked()
+        }
+    }
+
     popoutContent: Component {
         PopoutComponent {
             id: popout
@@ -352,7 +458,11 @@ PluginComponent {
             closePopout: function () { root.closePopout() }
 
             readonly property bool shown: parentPopout?.shouldBeVisible ?? false
-            onShownChanged: if (shown) root.refresh()
+            onShownChanged: {
+                root.editingNumber = -1
+                root.editingThreshold = false
+                if (shown) root.refresh()
+            }
 
             headerActions: Component {
                 Row {
@@ -365,15 +475,6 @@ PluginComponent {
                         tooltipSide: "bottom"
                         enabled: root.installed
                         onClicked: { root.closePopout(); root.addAccount() }
-                    }
-                    DActionButton {
-                        iconName: "bolt"
-                        iconColor: Theme.surfaceVariantText
-                        buttonSize: Theme.buttonHeightXXS
-                        tooltipText: I18n.trFor("claudeSwap", "Switch to the account with the most quota left")
-                        tooltipSide: "bottom"
-                        enabled: root.installed && !root.busy && root.accounts.length > 1
-                        onClicked: root.switchTo("best")
                     }
                     DActionButton {
                         iconName: "refresh"
@@ -390,6 +491,139 @@ PluginComponent {
                 width: parent.width
                 spacing: Theme.spacingS
 
+                // Switching first: it is what this plugin is for.
+                StyledRect {
+                    width: parent.width
+                    height: autoCol.implicitHeight + Theme.spacingM * 2
+                    radius: Theme.cornerRadius
+                    color: Theme.surfaceContainerHigh
+
+                    Column {
+                        id: autoCol
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: Theme.spacingM
+                        spacing: Theme.spacingM
+
+                        Item {
+                            width: parent.width
+                            height: Math.max(autoTitle.implicitHeight, autoToggle.height)
+                            SwapLogo {
+                                id: autoIcon
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                size: Theme.iconSizeMedium
+                                lit: root.autoOn
+                            }
+                            StyledText {
+                                id: autoTitle
+                                anchors.left: autoIcon.right
+                                anchors.leftMargin: Theme.spacingM
+                                anchors.right: autoToggle.left
+                                anchors.rightMargin: Theme.spacingS
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: I18n.trFor("claudeSwap", "Auto switch")
+                                font.weight: Font.Medium
+                            }
+                            DToggle {
+                                id: autoToggle
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                hideText: true
+                                checked: root.autoOn
+                                enabled: root.installed
+                                onToggled: checked => root.setAuto(checked)
+                            }
+                        }
+
+                        // The threshold stays out of the way: one line, a pencil to change it.
+                        Item {
+                            visible: root.autoOn
+                            width: parent.width
+                            height: Math.max(thresholdText.implicitHeight, thresholdEdit.height)
+                            StyledText {
+                                id: thresholdText
+                                anchors.left: parent.left
+                                anchors.right: thresholdEdit.left
+                                anchors.rightMargin: Theme.spacingS
+                                anchors.verticalCenter: parent.verticalCenter
+                                wrapMode: Text.WordWrap
+                                text: root.threshold >= 99.9
+                                    ? I18n.trFor("claudeSwap", "Switches when the active account runs out")
+                                    : I18n.trFor("claudeSwap", "Switches when the active account reaches %1").arg(root.thresholdLabel(root.threshold))
+                                font.pixelSize: Theme.fontSizeSmall
+                                color: Theme.surfaceVariantText
+                            }
+                            DActionButton {
+                                id: thresholdEdit
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                iconName: root.editingThreshold ? "close" : "edit"
+                                iconColor: Theme.surfaceVariantText
+                                buttonSize: Theme.buttonHeightXXS
+                                tooltipText: root.editingThreshold ? I18n.trFor("claudeSwap", "Cancel") : I18n.trFor("claudeSwap", "Change when to switch")
+                                tooltipSide: "bottom"
+                                onClicked: root.editingThreshold = !root.editingThreshold
+                            }
+                        }
+
+                        Column {
+                            visible: root.autoOn && root.editingThreshold
+                            width: parent.width
+                            spacing: Theme.spacingS
+
+                            // Suggestions; any other value goes in the field below.
+                            Row {
+                                id: thresholdRow
+                                width: parent.width
+                                spacing: 0
+                                readonly property real segWidth: width / root.thresholdOptions.length
+                                Repeater {
+                                    model: root.thresholdOptions
+                                    delegate: Segment {
+                                        required property var modelData
+                                        width: thresholdRow.segWidth
+                                        label: modelData >= 100 ? I18n.trFor("claudeSwap", "At limit") : modelData + "%"
+                                        sel: Math.abs(root.threshold - logic.clampThreshold(modelData)) < 0.01
+                                        onClicked: { root.setThreshold(modelData); root.editingThreshold = false }
+                                    }
+                                }
+                            }
+
+                            DTextField {
+                                id: thresholdField
+                                width: parent.width
+                                placeholderText: I18n.trFor("claudeSwap", "Other value: 50 to 100 (%)")
+                                maximumLength: 5
+                                showAcceptButton: true
+                                acceptButtonName: I18n.trFor("claudeSwap", "Save")
+                                isError: text !== "" && logic.parseThreshold(text) === null
+                                onVisibleChanged: if (visible) {
+                                    text = logic.isPresetThreshold(root.threshold, root.thresholdOptions) ? "" : String(root.threshold)
+                                    forceActiveFocus()
+                                    selectAll()
+                                }
+                                onAccepted: {
+                                    const n = logic.parseThreshold(text)
+                                    if (n === null) { shake(); return }
+                                    root.setThreshold(n)
+                                    root.editingThreshold = false
+                                }
+                                Keys.onEscapePressed: event => { root.editingThreshold = false; event.accepted = true }
+                            }
+                            StyledText {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                text: thresholdField.isError ? I18n.trFor("claudeSwap", "Enter a number from 50 to 100.")
+                                    : I18n.trFor("claudeSwap", "100 means only when the quota runs out. Enter saves, Esc cancels.")
+                                font.pixelSize: Theme.fontSizeSmall
+                                color: thresholdField.isError ? Theme.error : Theme.surfaceVariantText
+                            }
+                        }
+                    }
+                }
+
                 Repeater {
                     model: root.accounts
                     delegate: StyledRect {
@@ -397,6 +631,7 @@ PluginComponent {
                         required property var modelData
                         readonly property bool isActive: modelData.number === root.activeNumber
                         readonly property var u: root.usageOf(modelData)
+                        readonly property bool editing: root.editingNumber === modelData.number
 
                         width: parent.width
                         height: cardCol.implicitHeight + Theme.spacingM * 2
@@ -411,8 +646,8 @@ PluginComponent {
                             id: area
                             anchors.fill: parent
                             hoverEnabled: true
-                            cursorShape: acct.isActive ? Qt.ArrowCursor : Qt.PointingHandCursor
-                            onClicked: if (!acct.isActive) root.switchTo(acct.modelData.number)
+                            cursorShape: acct.isActive || root.editingNumber >= 0 ? Qt.ArrowCursor : Qt.PointingHandCursor
+                            onClicked: if (!acct.isActive && root.editingNumber < 0) root.switchTo(acct.modelData.number)
                         }
 
                         Column {
@@ -425,7 +660,7 @@ PluginComponent {
 
                             Item {
                                 width: parent.width
-                                height: Math.max(radio.height, accountName.implicitHeight, planChip.height)
+                                height: Math.max(radio.height, accountName.implicitHeight, planChip.height, acct.editing ? aliasField.height : 0)
                                 DIcon {
                                     id: radio
                                     anchors.left: parent.left
@@ -438,14 +673,50 @@ PluginComponent {
                                     id: accountName
                                     anchors.left: radio.right
                                     anchors.leftMargin: Theme.spacingS
-                                    anchors.right: planChip.left
-                                    anchors.rightMargin: Theme.spacingS
+                                    anchors.right: editButton.left
+                                    anchors.rightMargin: Theme.spacingXS
                                     anchors.verticalCenter: parent.verticalCenter
+                                    visible: !acct.editing
                                     wrapMode: Text.NoWrap
                                     textFormat: Text.PlainText
                                     elide: Text.ElideMiddle
                                     text: acct.modelData.alias || acct.modelData.email || ("#" + acct.modelData.number)
                                     font.weight: acct.isActive ? Font.Medium : Font.Normal
+                                }
+                                DTextField {
+                                    id: aliasField
+                                    visible: acct.editing
+                                    anchors.left: radio.right
+                                    anchors.leftMargin: Theme.spacingS
+                                    anchors.right: editButton.left
+                                    anchors.rightMargin: Theme.spacingXS
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    placeholderText: acct.modelData.email || ""
+                                    maximumLength: 40
+                                    showAcceptButton: true
+                                    acceptButtonName: I18n.trFor("claudeSwap", "Save")
+                                    isError: root.aliasProblem(acct.modelData.number, text) !== ""
+                                    onVisibleChanged: if (visible) {
+                                        text = acct.modelData.alias || ""
+                                        forceActiveFocus()
+                                        selectAll()
+                                    }
+                                    onAccepted: if (!root.saveAlias(acct.modelData, text)) shake()
+                                    Keys.onEscapePressed: event => { root.editingNumber = -1; event.accepted = true }
+                                }
+                                DActionButton {
+                                    id: editButton
+                                    anchors.right: planChip.visible ? planChip.left : parent.right
+                                    anchors.rightMargin: planChip.visible ? Theme.spacingS : 0
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    // Same pattern everywhere: pencil opens, ✕ cancels, Enter or ↵ saves.
+                                    iconName: acct.editing ? "close" : "edit"
+                                    iconColor: Theme.surfaceVariantText
+                                    buttonSize: Theme.buttonHeightXXS
+                                    tooltipText: acct.editing ? I18n.trFor("claudeSwap", "Cancel") : I18n.trFor("claudeSwap", "Rename")
+                                    tooltipSide: "bottom"
+                                    enabled: root.installed
+                                    onClicked: root.editingNumber = acct.editing ? -1 : acct.modelData.number
                                 }
                                 StyledRect {
                                     id: planChip
@@ -467,12 +738,31 @@ PluginComponent {
                                 }
                             }
 
+                            StyledText {
+                                readonly property string problem: acct.editing ? root.aliasProblem(acct.modelData.number, aliasField.text) : ""
+                                visible: acct.editing
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                text: problem || I18n.trFor("claudeSwap", "Enter saves, Esc cancels. Leave empty to show the email.")
+                                font.pixelSize: Theme.fontSizeSmall
+                                color: problem ? Theme.error : Theme.surfaceVariantText
+                            }
+
                             Column {
                                 width: parent.width
                                 spacing: Theme.spacingXS
                                 visible: !!acct.u
                                 UsageBar { name: I18n.trFor("claudeSwap", "5h"); win: acct.u ? acct.u.fiveHour : null }
                                 UsageBar { name: I18n.trFor("claudeSwap", "Week"); win: acct.u ? acct.u.sevenDay : null }
+                                StyledText {
+                                    readonly property var pace: logic.pace(acct.u ? acct.u.sevenDay : null)
+                                    visible: !!pace && pace.ahead
+                                    width: parent.width
+                                    wrapMode: Text.WordWrap
+                                    text: pace ? I18n.trFor("claudeSwap", "%1 points ahead of pace (%2% expected by now)").arg(pace.delta).arg(Math.round(pace.expected)) : ""
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    color: Theme.warning
+                                }
                             }
                             StyledText {
                                 visible: !acct.u
@@ -490,85 +780,9 @@ PluginComponent {
                     wrapMode: Text.WordWrap
                     color: Theme.surfaceVariantText
                     font.pixelSize: Theme.fontSizeSmall
-                    text: !root.installed ? I18n.trFor("claudeSwap", "claude-swap is not installed. Run: uv tool install claude-swap")
+                    text: !root.installed ? I18n.trFor("claudeSwap", "claude-swap is not installed. Install it with: uv tool install claude-swap (or pipx install claude-swap)")
                         : root.lastError !== "" ? root.lastError
                         : I18n.trFor("claudeSwap", "No accounts yet. Run `cswap add`, /login with the other account, then run `cswap add` again.")
-                }
-
-                StyledRect {
-                    width: parent.width
-                    height: autoCol.implicitHeight + Theme.spacingM * 2
-                    radius: Theme.cornerRadius
-                    color: Theme.surfaceContainerHigh
-
-                    Column {
-                        id: autoCol
-                        anchors.fill: parent
-                        anchors.margins: Theme.spacingM
-                        spacing: Theme.spacingM
-
-                        Item {
-                            width: parent.width
-                            height: Math.max(autoTitle.implicitHeight, autoToggle.height)
-                            DIcon {
-                                id: autoIcon
-                                anchors.left: parent.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                name: root.autoOn ? "sync" : "sync_disabled"
-                                size: Theme.iconSizeMedium
-                                color: root.autoOn ? Theme.primary : Theme.surfaceVariantText
-                            }
-                            StyledText {
-                                id: autoTitle
-                                anchors.left: autoIcon.right
-                                anchors.leftMargin: Theme.spacingM
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: I18n.trFor("claudeSwap", "Auto switch")
-                                font.weight: Font.Medium
-                            }
-                            DToggle {
-                                id: autoToggle
-                                anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
-                                hideText: true
-                                checked: root.autoOn
-                                enabled: root.installed
-                                onToggled: checked => root.setAuto(checked)
-                            }
-                        }
-
-                        Row {
-                            visible: root.autoOn
-                            width: parent.width
-                            spacing: 0
-                            Repeater {
-                                model: root.thresholdOptions
-                                delegate: StyledRect {
-                                    required property var modelData
-                                    required property int index
-                                    readonly property bool sel: Math.abs(root.threshold - modelData) < 0.01
-                                    width: parent.width / root.thresholdOptions.length
-                                    height: Theme.buttonHeightXXS
-                                    radius: Theme.cornerRadius
-                                    color: sel ? Theme.primary : segArea.containsMouse ? Theme.surfaceHover : "transparent"
-                                    StyledText {
-                                        anchors.centerIn: parent
-                                        text: modelData >= 99.9 ? I18n.trFor("claudeSwap", "At limit") : root.thresholdLabel(modelData)
-                                        font.pixelSize: Theme.fontSizeSmall
-                                        font.weight: parent.sel ? Font.Medium : Font.Normal
-                                        color: parent.sel ? Theme.surface : Theme.surfaceVariantText
-                                    }
-                                    MouseArea {
-                                        id: segArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.setThreshold(modelData)
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }

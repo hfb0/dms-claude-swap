@@ -1,6 +1,18 @@
 {
-  "100% (when exhausted)": {
-    "100% (when exhausted)": "100% (quando esgotar)"
+  "%1 points ahead of pace (%2% expected by now)": {
+    "%1 points ahead of pace (%2% expected by now)": "%1 pontos acima do ritmo (%2% esperado até agora)"
+  },
+  "%1 · %2% used, %3% expected by now. At this rate it runs out before the reset in %4.": {
+    "%1 · %2% used, %3% expected by now. At this rate it runs out before the reset in %4.": "%1 · %2% usado, %3% esperado até agora. Neste ritmo acaba antes do reinício em %4."
+  },
+  "%1 · resets in %2": {
+    "%1 · resets in %2": "%1 · reinicia em %2"
+  },
+  "100 means only when the quota runs out. Enter saves, Esc cancels.": {
+    "100 means only when the quota runs out. Enter saves, Esc cancels.": "100 significa só quando a cota acabar. Enter salva, Esc cancela."
+  },
+  "5-hour": {
+    "5-hour": "de 5 horas"
   },
   "5h": {
     "5h": "5h"
@@ -14,6 +26,9 @@
   "Add account": {
     "Add account": "Adicionar conta"
   },
+  "Another account already uses this name": {
+    "Another account already uses this name": "Outra conta já usa esse nome"
+  },
   "At limit": {
     "At limit": "Esgotar"
   },
@@ -23,11 +38,32 @@
   "Auto switch threshold": {
     "Auto switch threshold": "Limite da troca automática"
   },
+  "Bar style": {
+    "Bar style": "Estilo na barra"
+  },
+  "Cancel": {
+    "Cancel": "Cancelar"
+  },
+  "Cannot be only numbers": {
+    "Cannot be only numbers": "Não pode ser só números"
+  },
+  "Cannot start with '-'": {
+    "Cannot start with '-'": "Não pode começar com '-'"
+  },
+  "Change when to switch": {
+    "Change when to switch": "Mudar quando trocar"
+  },
   "Claude Accounts": {
     "Claude Accounts": "Contas do Claude"
   },
+  "Claude: %1% of the %2 limit used": {
+    "Claude: %1% of the %2 limit used": "Claude: %1% do limite %2 usado"
+  },
   "Claude: all accounts exhausted": {
     "Claude: all accounts exhausted": "Claude: todas as contas esgotadas"
+  },
+  "Claude: could not rename the account": {
+    "Claude: could not rename the account": "Claude: não foi possível renomear a conta"
   },
   "Claude: did not switch — %1": {
     "Claude: did not switch — %1": "Claude: não trocou — %1"
@@ -38,11 +74,32 @@
   "Claude: now on %1": {
     "Claude: now on %1": "Claude: agora em %1"
   },
+  "Claude: now on %1. Auto switch turned off because you picked the account.": {
+    "Claude: now on %1. Auto switch turned off because you picked the account.": "Claude: agora em %1. Troca automática desligada porque você escolheu a conta."
+  },
   "Claude: quota limit reached, switched to %1": {
     "Claude: quota limit reached, switched to %1": "Claude: cota no limite, trocou para %1"
   },
+  "Claude: weekly usage ahead of pace": {
+    "Claude: weekly usage ahead of pace": "Claude: uso semanal acima do ritmo"
+  },
+  "Compact": {
+    "Compact": "Compacto"
+  },
+  "Compact shows only the limit closest to running out. The icon is lit while auto switch is on.": {
+    "Compact shows only the limit closest to running out. The icon is lit while auto switch is on.": "Compacto mostra só o limite mais perto de acabar. O ícone fica aceso com a troca automática ligada."
+  },
+  "Enter a number from 50 to 100.": {
+    "Enter a number from 50 to 100.": "Digite um número de 50 a 100."
+  },
+  "Enter saves, Esc cancels. Leave empty to show the email.": {
+    "Enter saves, Esc cancels. Leave empty to show the email.": "Enter salva, Esc cancela. Deixe vazio para mostrar o e-mail."
+  },
   "Failed.": {
     "Failed.": "Falhou."
+  },
+  "Full (5-hour and weekly)": {
+    "Full (5-hour and weekly)": "Completo (5 horas e semanal)"
   },
   "Leave empty to use the DMS terminal. Otherwise the command that runs a program in your terminal, e.g. `kitty -e`.": {
     "Leave empty to use the DMS terminal. Otherwise the command that runs a program in your terminal, e.g. `kitty -e`.": "Deixe vazio para usar o terminal do DMS. Senão, o comando que abre um programa no seu terminal, por exemplo `kitty -e`."
@@ -50,32 +107,59 @@
   "No accounts yet. Run `cswap add`, /login with the other account, then run `cswap add` again.": {
     "No accounts yet. Run `cswap add`, /login with the other account, then run `cswap add` again.": "Nenhuma conta cadastrada. Rode `cswap add`, faça /login na outra conta e `cswap add` de novo."
   },
+  "Notify when the active account reaches 75%, 85% and 95% of its 5-hour or weekly limit": {
+    "Notify when the active account reaches 75%, 85% and 95% of its 5-hour or weekly limit": "Avisar quando a conta ativa chegar a 75%, 85% e 95% do limite de 5 horas ou semanal"
+  },
+  "Notify when weekly usage is well ahead of pace and would run out before the reset": {
+    "Notify when weekly usage is well ahead of pace and would run out before the reset": "Avisar quando o uso semanal estiver bem acima do ritmo e for acabar antes do reinício"
+  },
+  "Other value: 50 to 100 (%)": {
+    "Other value: 50 to 100 (%)": "Outro valor: 50 a 100 (%)"
+  },
+  "Pace alerts": {
+    "Pace alerts": "Alertas de ritmo"
+  },
   "Press Enter to close": {
     "Press Enter to close": "Enter para fechar"
   },
   "Refresh": {
     "Refresh": "Atualizar"
   },
+  "Rename": {
+    "Rename": "Renomear"
+  },
   "Runs `cswap auto` while the shell is running": {
     "Runs `cswap auto` while the shell is running": "Roda o `cswap auto` enquanto o DMS estiver aberto"
+  },
+  "Save": {
+    "Save": "Salvar"
   },
   "Sign in with the NEW account in your browser.": {
     "Sign in with the NEW account in your browser.": "Faça login com a conta NOVA no navegador."
   },
-  "Switch accounts when the active account's quota reaches this point": {
-    "Switch accounts when the active account's quota reaches this point": "Troca de conta quando a cota da conta ativa chega neste ponto"
+  "Switch accounts when the active account's quota reaches this point. 100% means only when it runs out.": {
+    "Switch accounts when the active account's quota reaches this point. 100% means only when it runs out.": "Trocar de conta quando a cota da conta ativa chegar a este ponto. 100% significa só quando acabar."
   },
-  "Switch to the account with the most quota left": {
-    "Switch to the account with the most quota left": "Trocar para a conta com mais cota"
+  "Switches when the active account reaches %1": {
+    "Switches when the active account reaches %1": "Troca quando a conta ativa chegar a %1"
+  },
+  "Switches when the active account runs out": {
+    "Switches when the active account runs out": "Troca quando a conta ativa esgotar"
   },
   "Terminal": {
     "Terminal": "Terminal"
   },
+  "Usage alerts": {
+    "Usage alerts": "Alertas de uso"
+  },
+  "Use only letters, digits, '-', '_' and '.'": {
+    "Use only letters, digits, '-', '_' and '.'": "Use só letras, dígitos, '-', '_' e '.'"
+  },
   "Week": {
     "Week": "Semana"
   },
-  "claude-swap is not installed. Run: uv tool install claude-swap": {
-    "claude-swap is not installed. Run: uv tool install claude-swap": "claude-swap não instalado. Rode: uv tool install claude-swap"
+  "claude-swap is not installed. Install it with: uv tool install claude-swap (or pipx install claude-swap)": {
+    "claude-swap is not installed. Install it with: uv tool install claude-swap (or pipx install claude-swap)": "O claude-swap não está instalado. Instale com: uv tool install claude-swap (ou pipx install claude-swap)"
   },
   "cswap error": {
     "cswap error": "erro no cswap"
@@ -100,5 +184,8 @@
   },
   "week %1%": {
     "week %1%": "semana %1%"
+  },
+  "weekly": {
+    "weekly": "semanal"
   }
 }

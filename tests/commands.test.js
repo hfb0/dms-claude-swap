@@ -75,3 +75,21 @@ test('auto loop: one instance holds the lock, it is released on SIGTERM', async 
     again.kill('SIGTERM');
     await new Promise(r => again.on('exit', r));
 });
+
+test('add account saves the current account first, then signs in and saves the new one', () => {
+    for (const firstAddFails of [false, true]) {
+        const { home, env } = sandbox(false);
+        const bin = path.join(home, '.local', 'bin');
+        const log = path.join(home, 'calls.log');
+        // The first `cswap add` may fail (nobody signed in yet); the flow must go on.
+        fs.writeFileSync(path.join(bin, 'cswap'),
+            `#!/bin/sh\necho "cswap $*" >> "${log}"\n` +
+            (firstAddFails ? `[ -e "${log}.once" ] || { touch "${log}.once"; exit 1; }\n` : '') + 'exit 0\n', { mode: 0o755 });
+        fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\necho "claude $*" >> "${log}"\nexit 0\n`, { mode: 0o755 });
+        const cmd = L.addAccountCommand([], ['intro', 'added', 'failed', 'enter']);
+        const r = spawnSync(cmd[0], cmd.slice(1), { env: { ...env, PATH: bin + ':/usr/bin:/bin' }, input: '\n', encoding: 'utf8' });
+        assert.equal(r.status, 0);
+        assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split('\n'), ['cswap add', 'claude auth login', 'cswap add']);
+        assert.match(r.stdout, /added/);
+    }
+});

@@ -28,6 +28,22 @@ QtObject {
         return Math.min(99.9, Math.max(50, n))
     }
 
+    // A threshold typed by the user: 50–100 (100 = at limit), comma or dot decimals.
+    // Returns the number, or null when it is not a plain number in range.
+    function parseThreshold(s) {
+        var v = String(s || "").replace("%", "").trim().replace(",", ".")
+        if (!/^[0-9]+(\.[0-9]+)?$/.test(v)) return null
+        var n = parseFloat(v)
+        return n >= 50 && n <= 100 ? n : null
+    }
+
+    // Compared after clamping, so a stored 99.9 and the "at limit" preset (100) match.
+    function isPresetThreshold(t, presets) {
+        for (var i = 0; i < presets.length; i++)
+            if (Math.abs(clampThreshold(t) - clampThreshold(presets[i])) < 0.01) return true
+        return false
+    }
+
     // exec keeps the lock fd on cswap itself, so stopping the process releases the lock.
     // `>>` opens without truncating, so a pre-existing file at the path is left intact.
     function autoCommand(lockPath, threshold) {
@@ -37,8 +53,12 @@ QtObject {
 
     // terminalPrefix: argv that runs a command in a terminal, e.g. ["kitty", "-e"].
     // messages: [intro, added, failed, pressEnter]
+    // The first `cswap add` saves the account signed in now, so the new login does not
+    // replace credentials cswap never stored. Re-adding a saved account only refreshes
+    // it, and a failure there (nobody signed in yet) is ignored.
     function addAccountCommand(terminalPrefix, messages) {
-        var script = 'echo "$1"; echo; claude auth login && cswap add && echo && echo "$2" || echo "$3"; '
+        var script = 'echo "$1"; echo; cswap add </dev/null >/dev/null 2>&1; '
+            + 'claude auth login && cswap add && echo && echo "$2" || echo "$3"; '
             + 'echo; printf "%s" "$4"; read x'
         return terminalPrefix.concat(["sh", "-c", pathPrefix + script, "sh"]).concat(messages)
     }
@@ -53,6 +73,20 @@ QtObject {
         return a.alias || a.email || ("#" + a.number)
     }
 
+    // cswap's switch and auto events carry only {number, email}; the alias lives in
+    // the account list, so look the account up there first.
+    function labelFor(ref, accounts) {
+        if (ref && typeof ref === "object" && accounts) {
+            for (var i = 0; i < accounts.length; i++) {
+                var a = accounts[i]
+                if ((ref.number !== null && ref.number !== undefined && a.number === ref.number)
+                        || (ref.email && a.email === ref.email))
+                    return label(a)
+            }
+        }
+        return label(ref)
+    }
+
     function usageOf(a) {
         return a ? (a.usage || a.lastGoodUsage || null) : null
     }
@@ -60,6 +94,16 @@ QtObject {
     // Rounded percentage of a usage window, or -1 when unknown.
     function pct(w) {
         return w && w.pct !== null && w.pct !== undefined ? Math.round(w.pct) : -1
+    }
+
+    // The window closest to its limit (highest known usage), or null.
+    function tightest(u) {
+        if (!u) return null
+        var best = null
+        var wins = [u.fiveHour, u.sevenDay]
+        for (var i = 0; i < wins.length; i++)
+            if (pct(wins[i]) >= 0 && (!best || wins[i].pct > best.pct)) best = wins[i]
+        return best
     }
 
     function level(p, warnPct, critPct) {
@@ -77,6 +121,94 @@ QtObject {
         if (d > 0) return d + "d " + h + "h"
         if (h > 0) return h + "h " + m + "m"
         return Math.max(1, m) + "m"
+    }
+
+    // ---- alias editing ----
+
+    // Same rules as cswap's normalize_alias, checked here for instant feedback
+    // (cswap validates again). "" means remove the alias.
+    // error: "" | "numeric" | "dash" | "chars"
+    function normalizeAlias(s) {
+        var v = String(s || "").trim().toLowerCase()
+        if (!v) return { value: "", error: "" }
+        if (/^[0-9]+$/.test(v)) return { value: v, error: "numeric" }
+        if (v.charAt(0) === "-") return { value: v, error: "dash" }
+        if (!/^[a-z0-9_.-]+$/.test(v)) return { value: v, error: "chars" }
+        return { value: v, error: "" }
+    }
+
+    function aliasArgs(n, alias) {
+        return alias ? ["alias", String(n), alias] : ["alias", String(n), "--unset"]
+    }
+
+    // ---- pace and alerts ----
+
+    // Usage levels that raise a notification, lowest first.
+    readonly property var alertLevels: [75, 85, 95]
+    readonly property var alertWindows: ["fiveHour", "sevenDay"]
+
+    // cswap only computes pace for weekly windows, and only once a cycle is under way.
+    // `ahead` is cswap's noise-gated marker (15 points over the linear pace).
+    function pace(w) {
+        if (!w || typeof w.expectedPct !== "number" || typeof w.pct !== "number") return null
+        return { expected: w.expectedPct, ahead: w.aheadOfPace === true, delta: Math.round(w.pct) - Math.round(w.expectedPct) }
+    }
+
+    // resetsAt drifts by fractions of a second between readings, so it is bucketed to 10 minutes.
+    function resetBucket(w) {
+        var t = w && w.resetsAt ? Date.parse(w.resetsAt) : NaN
+        return isNaN(t) ? -1 : Math.round(t / 600000)
+    }
+
+    function windowKey(n, name, w) {
+        return n + "|" + name + "|" + resetBucket(w)
+    }
+
+    // Alerts for the active account. `sent` maps windowKey -> highest level already
+    // notified (and windowKey + "|pace" -> 1); it is returned updated, with the
+    // cycles that have already reset dropped. Only fresh readings count: an alert
+    // from lastGoodUsage would report old numbers as news.
+    // opts: {levels: bool, pace: bool}
+    function usageAlerts(acct, sent, opts, nowSec) {
+        if (!acct) return { alerts: [], sent: sent }
+        var next = {}
+        for (var k in sent) {
+            var bucket = parseInt(k.split("|")[2], 10)
+            if (bucket * 600 > nowSec) next[k] = sent[k]
+        }
+        var alerts = []
+        var top = alertLevels[alertLevels.length - 1]
+        var u = acct.usage || {}
+        for (var i = 0; i < alertWindows.length; i++) {
+            var name = alertWindows[i], w = u[name]
+            if (!w || typeof w.pct !== "number" || resetBucket(w) < 0) continue
+            var key = windowKey(acct.number, name, w)
+            if (opts.levels) {
+                var hit = 0
+                for (var j = 0; j < alertLevels.length; j++)
+                    if (w.pct >= alertLevels[j]) hit = alertLevels[j]
+                if (hit > (next[key] || 0)) {
+                    alerts.push({ kind: "level", window: name, level: hit, pct: Math.round(w.pct), resetsAt: w.resetsAt })
+                    next[key] = hit
+                }
+            }
+            var p = pace(w)
+            if (opts.pace && p && p.ahead && w.willLastToReset === false && w.pct < top && !next[key + "|pace"]) {
+                alerts.push({ kind: "pace", window: name, pct: Math.round(w.pct), expected: Math.round(p.expected), resetsAt: w.resetsAt })
+                next[key + "|pace"] = 1
+            }
+        }
+        return { alerts: alerts, sent: next }
+    }
+
+    function escapeMarkup(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    }
+
+    // The tag makes a newer alert for the same window replace the previous one.
+    function notifyCommand(title, body, urgency, tag) {
+        return ["dms", "notify", "-a", "Claude Swap", "-u", urgency, "-h", "string:x-dms-tag:" + tag,
+                escapeMarkup(title), escapeMarkup(body)]
     }
 
     // `cswap list --json` -> {accounts, activeNumber} or {error: "cswap" | "parse", message}

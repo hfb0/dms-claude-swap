@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 26 26" width="128" height="128" role="img" aria-label="Claude Swap">
+  <!-- Same geometry as SwapLogo.qml: a spark inside two circling arrows. -->
+  <g fill="none" stroke="#8B7CF6" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19.2 8.2 A8 8 0 0 0 5.2 7.6"/>
+    <path d="M2.9 5.2 L5.2 7.9 L8.4 6.6"/>
+    <g transform="rotate(180 12 12)">
+      <path d="M19.2 8.2 A8 8 0 0 0 5.2 7.6"/>
+      <path d="M2.9 5.2 L5.2 7.9 L8.4 6.6"/>
+    </g>
+  </g>
+  <path fill="#8B7CF6" d="M12 7.2 Q13.3 10.7 16.8 12 Q13.3 13.3 12 16.8 Q10.7 13.3 7.2 12 Q10.7 10.7 12 7.2 Z"/>
+</svg>

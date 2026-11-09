@@ -1,70 +1,201 @@
+<div align="center">
+
+<img src="./docs/logo.svg" alt="Claude Swap" width="112" />
+
 # Claude Swap
 
-A DankMaterialShell bar widget for people who use **more than one Claude Code account**. It shows each account's usage, switches accounts with one click, and can switch on its own when the active account runs out of quota. Account handling is done by [claude-swap](https://github.com/realiti4/claude-swap) (`cswap`).
+**Switch between multiple Claude Code accounts from the Dux Shell bar.**
 
-![Claude Swap popout](docs/screenshot.png)
+A [Dux Shell](https://github.com/duxlabs-dev/dux-shell) (formerly DankMaterialShell) plugin that shows
+usage for each Claude Code account, switches the active account with one click, and can switch
+automatically when the active account reaches its limit.
+
+[![Release](https://img.shields.io/github/v/release/hfb0/dms-claude-swap?color=8B7CF6&label=release)](https://github.com/hfb0/dms-claude-swap/releases/latest)
+[![Dux Shell](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fhfb0%2Fdms-claude-swap%2Fmain%2Fplugin.json&query=%24.requires_dms&label=Dux%20Shell&color=8B7CF6)](https://github.com/duxlabs-dev/dux-shell)
+[![Tests](https://github.com/hfb0/dms-claude-swap/actions/workflows/tests.yml/badge.svg)](https://github.com/hfb0/dms-claude-swap/actions/workflows/tests.yml)
+[![License](https://img.shields.io/github/license/hfb0/dms-claude-swap?color=64748B)](./LICENSE)
+
+[**Preview**](#preview) · [**Installation**](#installation) · [**How it works**](#how-it-works) · [**Support**](#support) · [**Development**](#development)
+
+</div>
+
+## Preview
+
+<div align="center">
+
+<img src="./docs/demo.gif" alt="Auto switch is turned on while the active account is at 100% of its weekly limit; the plugin switches to the other account and shows a notification" width="640" />
+
+</div>
+
+## Overview
+
+Claude Code subscriptions have 5-hour and weekly usage limits. Moving to another account manually
+requires `/logout` and `/login`, and there is no single place to see which account still has quota.
+
+Claude Swap uses [claude-swap](https://github.com/realiti4/claude-swap) to keep every account
+authenticated and switches between them from the bar. Most usage plugins only display quota;
+this one also changes the active account.
 
 ## Features
 
-- **Bar:** 5-hour and weekly usage rings for the active account, plus an icon showing whether auto switch is on.
-- **Popout:**
-  - one card per account, with email, plan, and 5-hour/weekly usage bars showing the time until reset;
-  - **click an account** to make it active;
-  - **⚡** switches to the account with the most quota left;
-  - **👤+** adds an account: opens a terminal that runs `claude auth login`, then `cswap add`;
-  - **auto switch** on/off, with a threshold of 80%, 90%, 95% or "at limit" (99.9%).
+<table>
+<tr>
+<td width="50%" valign="top">
 
-Auto switch runs `cswap auto` as a process owned by the shell, so no systemd unit is needed. A `flock` lock keeps a single copy running even with several monitors. On Linux, Claude Code re-reads its credentials file, so open sessions move to the new account on their next message.
+**Automatic switching**<br />
+When enabled, switches to another account once the active account reaches its limit. The pencil
+button sets an earlier threshold: 80%, 90%, 95%, or any value from 50 to 100. Selecting an account
+manually disables automatic switching.
 
-## Requirements
+</td>
+<td width="50%" valign="top">
 
-- DankMaterialShell 2.1.0 or newer
-- [claude-swap](https://github.com/realiti4/claude-swap): `uv tool install claude-swap`
-- `flock` (util-linux)
-- Claude Code (`claude`) for the add-account flow, which opens the terminal configured in DMS (or `$TERMINAL`); the plugin settings can override it.
+**Manual switching**<br />
+One card per account with plan, 5-hour usage and weekly usage. Click a card to make that account
+active. Running Claude Code sessions use the new account from their next request.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Usage pace**<br />
+A marker on the weekly bar shows the expected usage at a linear pace. A warning is shown when the
+account is far enough ahead of that pace to run out before the reset.
+
+</td>
+<td valign="top">
+
+**Usage alerts**<br />
+Desktop notifications when the active account reaches 75%, 85% and 95% of a limit, and when it is
+ahead of pace. Each alert fires once per reset cycle and replaces the previous one.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Bar widget**<br />
+Shows the plugin icon, lit while automatic switching is enabled, and the usage of the limit closest
+to running out. The value turns yellow at 75% and red at 95%, matching the alerts. A full style
+shows both limits as rings.
+
+</td>
+<td valign="top">
+
+**Account management**<br />
+Rename accounts from their cards (stored as claude-swap aliases) and add accounts from the popout.
+Aliases are used everywhere, including notifications. UI available in English and Brazilian
+Portuguese.
+
+</td>
+</tr>
+</table>
 
 ## Installation
 
-```sh
-git clone https://github.com/hfb0/dms-claude-swap ~/.config/DankMaterialShell/plugins/claudeSwap
-dms ipc call plugin-scan rescan claudeSwap
-dms ipc call plugins enable claudeSwap
+**1. Install the plugin** from the Dux Shell plugin store:
+
+```bash
+dms plugins install claudeSwap
 ```
 
-Then add the **Claude Swap** widget to your bar under Settings → Plugins.
+It is also listed under Settings → Plugins and in the [plugin directory](https://duxlabs.dev/plugins).
 
-### Adding accounts
+**2. Install claude-swap**, which stores the accounts and performs the switch. It needs Python 3.12
+or newer. With [uv](https://docs.astral.sh/uv/), which downloads a suitable Python when the system
+one is older:
 
-Use the 👤+ button in the popout, or from a terminal:
-
-```sh
-cswap add            # saves the account you are signed in to
-# in Claude Code: /login with the other account (do NOT /logout)
-cswap add
+```bash
+sudo pacman -S uv                                   # Arch
+curl -LsSf https://astral.sh/uv/install.sh | sh     # other distributions
+uv tool install claude-swap
 ```
 
-## Updating
+Or with pipx, when the system Python is 3.12 or newer (Arch, Debian 13, Ubuntu 24.04 and later):
 
-```sh
+```bash
+sudo pacman -S python-pipx    # Arch
+sudo apt install pipx         # Debian, Ubuntu
+pipx ensurepath
+pipx install claude-swap
+```
+
+Plain `pip install` does not work on these distributions: the system Python is marked as externally
+managed (PEP 668). Both methods put `cswap` in `~/.local/bin`, where the plugin looks for it.
+
+**3. Add your accounts.** Click the add-account button at the top of the popout and sign in with
+the other account in the browser. Repeat for each account.
+
+<div align="center">
+<img src="./docs/add-account.png" alt="The add-account button, next to the refresh button at the top of the Claude Accounts popout" width="480" />
+</div>
+
+<details>
+<summary>From a terminal</summary>
+
+```bash
+cswap add            # 1. save the account you are signed in to
+claude auth login    # 2. sign in with the next account (do not log out first)
+cswap add            # 3. save that account too
+```
+
+</details>
+
+**4. Add the widget** to a bar section under Settings → Plugins.
+
+> [!NOTE]
+> Requirements: Dux Shell 2.1.0 or newer, `flock` (util-linux), and Claude Code (`claude`) for the
+> add-account flow. That flow opens the terminal configured in Dux Shell (or `$TERMINAL`); the
+> plugin settings can override it.
+
+## How it works
+
+- **Switching** runs `cswap switch`. On Linux, Claude Code re-reads its credentials file, so no
+  restart is needed.
+- **Automatic switching** runs `cswap auto` as a process owned by the shell, so no systemd unit is
+  required. A `flock` lock and a single owner instance across bars keep one process running on
+  multi-monitor setups.
+- **Pace** is computed by claude-swap for weekly windows only. An account is marked as ahead when
+  it is 15 or more points above a linear pace. The projection is linear, so bursty usage makes it
+  less accurate.
+- **Network and credentials:** the plugin makes no network requests of its own. claude-swap
+  contacts Anthropic (usage and token refresh) and PyPI (update check), and stores credentials in
+  files with `0600` permissions.
+
+## Support
+
+The [plugin directory](https://duxlabs.dev/plugins) ranks plugins by the thumbs-up reactions on
+their registry issue. A reaction there helps other Dux Shell users find the plugin.
+
+<div align="center">
+
+[![Upvote on Dux Shell Plugins](https://img.shields.io/badge/Dux%20Shell%20Plugins-upvote-8B7CF6?style=for-the-badge)](https://github.com/duxlabs-dev/dux-plugin-registry/issues/1163)
+[![Star on GitHub](https://img.shields.io/github/stars/hfb0/dms-claude-swap?style=for-the-badge&color=FFC400&label=star)](https://github.com/hfb0/dms-claude-swap/stargazers)
+
+</div>
+
+Bugs and feature requests: [open an issue](https://github.com/hfb0/dms-claude-swap/issues/new).
+
+## Development
+
+Pure logic lives in `ClaudeSwapLogic.qml` (plain functions, no bindings) so it runs under node:
+
+```bash
+node --test tests/*.test.js
+```
+
+The tests cover JSON parsing, pace and alerts, alias and threshold validation, the shell wrappers
+(against a fake `cswap`, including the auto-switch lock), the manifest, and translation coverage.
+
+To update a git checkout:
+
+```bash
 git -C ~/.config/DankMaterialShell/plugins/claudeSwap pull
 dms restart
 ```
 
-DMS caches the plugin directory, so new files from an update only load after a restart.
-
-## Development
-
-Pure logic lives in `ClaudeSwapLogic.qml` (plain functions, no bindings) so it can run under node:
-
-```sh
-node --test tests/*.test.js
-```
-
-The tests cover JSON parsing, countdown formatting, the shell wrappers (against a fake `cswap`, including the auto-switch lock), the manifest, and translation coverage.
-
-## Translations
-
-The UI is in English, with a Brazilian Portuguese translation in `translations/pt_BR.json`.
+Dux Shell caches the plugin directory, so new files from an update load only after a restart.
 
 ## Disclaimer
 
@@ -72,9 +203,11 @@ Rotating accounts to get around usage limits may go against Anthropic's terms. U
 
 ## Credits
 
-- The bar layout, usage rings and popout are inspired by [DankClaudeUsage](https://github.com/bogdan-velicu/DankClaudeUsage) by Bogdan Velicu. `UsageRing.qml` is adapted from it (MIT).
-- Account switching and usage data come from [claude-swap](https://github.com/realiti4/claude-swap) by Onur Cetinkol.
+- Inspired by Bogdan Velicu's [DankClaudeUsage](https://github.com/bogdan-velicu/DankClaudeUsage) (MIT, see [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)).
+- Account switching and usage data come from Onur Cetinkol's [claude-swap](https://github.com/realiti4/claude-swap).
 
-## License
+---
 
-MIT
+<div align="center">
+<sub>MIT License</sub>
+</div>
