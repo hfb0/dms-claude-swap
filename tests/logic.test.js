@@ -64,6 +64,9 @@ test('parseSwitch', () => {
 test('parseAutoEvent keeps only switch and all-exhausted', () => {
     assert.deepEqual(L.parseAutoEvent('{"event":"switch","to":{"email":"a@b"}}'), { kind: 'switch', to: { email: 'a@b' } });
     assert.equal(L.parseAutoEvent('{"event":"all-exhausted"}').kind, 'exhausted');
+    assert.equal(L.parseAutoEvent('{"event":"all-exhausted","earliestResetAt":"2026-11-10T14:20:00Z"}').resetsAt,
+        '2026-11-10T14:20:00Z');
+    assert.equal(L.parseAutoEvent('{"event":"all-exhausted","earliestResetAt":null}').resetsAt, '');
     assert.equal(L.parseAutoEvent('{"event":"poll"}').kind, null);
     assert.equal(L.parseAutoEvent('{oops').kind, null);
 });
@@ -112,25 +115,25 @@ test('windowKey is stable across the sub-second drift of resetsAt', () => {
 test('usageAlerts fires the highest crossed level once per window cycle', () => {
     const opts = { levels: true, pace: false };
     let r = L.usageAlerts(acct(1, { pct: 10 }, { pct: 88, resetsAt: RESET }), {}, opts, NOW);
-    assert.deepEqual(r.alerts.map(a => [a.kind, a.window, a.level]), [['level', 'sevenDay', 85]]);
+    assert.deepEqual(r.alerts.map(a => [a.kind, a.window, a.level]), [['level', 'sevenDay', 80]]);
     // same level again: silent
-    r = L.usageAlerts(acct(1, { pct: 10 }, { pct: 89, resetsAt: RESET }), r.sent, opts, NOW);
+    r = L.usageAlerts(acct(1, { pct: 10 }, { pct: 93, resetsAt: RESET }), r.sent, opts, NOW);
     assert.equal(r.alerts.length, 0);
     // next level: fires
     r = L.usageAlerts(acct(1, { pct: 10 }, { pct: 96, resetsAt: RESET }), r.sent, opts, NOW);
     assert.deepEqual(r.alerts.map(a => a.level), [95]);
     // new cycle (different reset) starts over
     r = L.usageAlerts(acct(1, { pct: 10 }, { pct: 80, resetsAt: '2026-11-18T15:00:00Z' }), r.sent, opts, NOW);
-    assert.deepEqual(r.alerts.map(a => a.level), [75]);
+    assert.deepEqual(r.alerts.map(a => a.level), [80]);
 });
 
 test('usageAlerts keeps other accounts\' state and drops expired cycles', () => {
     const opts = { levels: true, pace: false };
     const old = L.windowKey(9, 'fiveHour', { resetsAt: '2026-11-08T15:00:00Z' });   // before NOW
-    let r = L.usageAlerts(acct(1, null, { pct: 76, resetsAt: RESET }), { [old]: 75 }, opts, NOW);
+    let r = L.usageAlerts(acct(1, null, { pct: 81, resetsAt: RESET }), { [old]: 80 }, opts, NOW);
     assert.equal(old in r.sent, false);
     r = L.usageAlerts(acct(2, null, { pct: 50, resetsAt: RESET }), r.sent, opts, NOW);
-    r = L.usageAlerts(acct(1, null, { pct: 77, resetsAt: RESET }), r.sent, opts, NOW);
+    r = L.usageAlerts(acct(1, null, { pct: 82, resetsAt: RESET }), r.sent, opts, NOW);
     assert.equal(r.alerts.length, 0, 'switching away and back must not re-alert');
 });
 
@@ -209,9 +212,9 @@ test('100 means "at limit" and reaches cswap as 99.9', () => {
 
 test('color levels line up with the alert levels', () => {
     const warn = L.alertLevels[0], crit = L.alertLevels[L.alertLevels.length - 1];
-    assert.deepEqual([warn, crit], [75, 95]);
-    assert.equal(L.level(74, warn, crit), 'ok');
-    assert.equal(L.level(75, warn, crit), 'warn');
+    assert.deepEqual([warn, crit], [80, 95]);
+    assert.equal(L.level(79, warn, crit), 'ok');
+    assert.equal(L.level(80, warn, crit), 'warn');
     assert.equal(L.level(94, warn, crit), 'warn');
     assert.equal(L.level(95, warn, crit), 'crit');
 });
@@ -255,4 +258,76 @@ test('scopedWindows accepts the array-like lists Qt hands back from shared state
     const fable = { name: 'Fable', pct: 100, resetsAt: RESET };
     assert.deepEqual(L.scopedWindows({ scoped: { 0: fable, length: 1 } }), [{ name: 'Fable', win: fable }]);
     assert.deepEqual(L.scopedWindows({ scoped: 'Fable' }), []);
+});
+
+// ---- stale readings, quiet alerts and fallback accounts ----
+test('usageAlerts skips a window whose reset already passed and does not repeat it', () => {
+    // cswap serves the old reading for a minute or so after the reset: 100% with a past resetsAt.
+    const opts = { levels: true, pace: true };
+    const w = { pct: 100, resetsAt: '2026-11-08T15:59:57Z' };   // 3 s before NOW
+    const sent = { [L.windowKey(2, 'fiveHour', w)]: 95 };
+    for (const dt of [0, 60, 120]) {
+        const r = L.usageAlerts(acct(2, w, null), sent, opts, NOW + dt);
+        assert.equal(r.alerts.length, 0, 'no alert at +' + dt + 's');
+    }
+    assert.equal(L.usageAlerts(acct(2, w, null), {}, opts, NOW).alerts.length, 0, 'not even the first time');
+});
+
+test('usageAlerts keeps the state of a live window that rounds to an earlier bucket', () => {
+    // Resets at 16:04: the 10-minute bucket rounds down to 16:00, before the real reset.
+    const opts = { levels: true, pace: false };
+    const w = { pct: 96, resetsAt: '2026-11-08T16:04:00Z' };
+    let r = L.usageAlerts(acct(2, w, null), {}, opts, NOW - 120);
+    assert.deepEqual(r.alerts.map(a => a.level), [95]);
+    for (const dt of [0, 60, 180]) {
+        r = L.usageAlerts(acct(2, w, null), r.sent, opts, NOW + dt);
+        assert.equal(r.alerts.length, 0, 'no repeat at +' + dt + 's');
+    }
+});
+
+test('usageAlerts stays quiet when told to, and does not record what it skipped', () => {
+    const week = { pct: 96, resetsAt: RESET, expectedPct: 40, aheadOfPace: true, willLastToReset: false };
+    let r = L.usageAlerts(acct(1, { pct: 85, resetsAt: '2026-11-08T17:00:00Z' }, week), {}, { levels: true, pace: true, quiet: true }, NOW);
+    assert.equal(r.alerts.length, 0);
+    assert.deepEqual(r.sent, {});
+    // the reserve is gone: the current level fires right away
+    r = L.usageAlerts(acct(1, { pct: 85, resetsAt: '2026-11-08T17:00:00Z' }, week), r.sent, { levels: true, pace: true }, NOW);
+    assert.deepEqual(r.alerts.map(a => [a.window, a.level]), [['fiveHour', 80], ['sevenDay', 95]]);
+});
+
+test('hasRoom: every known 5h/weekly window under the switch line, renewed windows count as free', () => {
+    const fut = '2026-11-08T18:00:00Z', past = '2026-11-08T15:00:00Z';
+    const a = (five, week, extra) => ({ number: 1, usage: { fiveHour: five, sevenDay: week }, ...extra });
+    assert.equal(L.hasRoom(a({ pct: 40, resetsAt: fut }, { pct: 52, resetsAt: RESET }), 99.9, NOW), true);
+    assert.equal(L.hasRoom(a({ pct: 100, resetsAt: fut }, { pct: 52, resetsAt: RESET }), 99.9, NOW), false);
+    assert.equal(L.hasRoom(a({ pct: 85, resetsAt: fut }, { pct: 10, resetsAt: RESET }), 80, NOW), false);
+    assert.equal(L.hasRoom(a({ pct: 100, resetsAt: past }, { pct: 10, resetsAt: RESET }), 99.9, NOW), true);
+    assert.equal(L.hasRoom(a({ pct: 10, resetsAt: fut }, { pct: 10, resetsAt: RESET }, { disabled: true }), 99.9, NOW), false);
+    assert.equal(L.hasRoom({ number: 1, usageStatus: 'network' }, 99.9, NOW), false);
+    assert.equal(L.hasRoom({ number: 1, usage: { fiveHour: { pct: null } } }, 99.9, NOW), false);
+    assert.equal(L.hasRoom(null, 99.9, NOW), false);
+    // per-model limits are not part of cswap's default switch decision
+    assert.equal(L.hasRoom({ number: 1, usage: { fiveHour: { pct: 5, resetsAt: fut }, scoped: [{ name: 'Fable', pct: 100, resetsAt: RESET }] } }, 99.9, NOW), true);
+});
+
+test('hasFallback looks only at the other accounts', () => {
+    const fut = '2026-11-08T18:00:00Z';
+    const full = { number: 1, usage: { fiveHour: { pct: 100, resetsAt: fut } } };
+    const free = { number: 2, usage: { fiveHour: { pct: 30, resetsAt: fut } } };
+    assert.equal(L.hasFallback([full, free], 1, 99.9, NOW), true);
+    assert.equal(L.hasFallback([full, free], 2, 99.9, NOW), false);
+    assert.equal(L.hasFallback([free], 2, 99.9, NOW), false);
+    assert.equal(L.hasFallback({ 0: full, 1: free, length: 2 }, 1, 99.9, NOW), true, 'QVariantList from globalVars');
+});
+
+test('atLimit and ageMinutes describe an exhausted account\'s reading', () => {
+    const fut = '2026-11-08T18:00:00Z';
+    assert.equal(L.atLimit({ usage: { fiveHour: { pct: 100, resetsAt: fut } } }, NOW), true);
+    assert.equal(L.atLimit({ usage: { fiveHour: { pct: 100, resetsAt: '2026-11-08T15:00:00Z' } } }, NOW), false);
+    assert.equal(L.atLimit({ usage: { sevenDay: { pct: 99, resetsAt: RESET } } }, NOW), false);
+    assert.equal(L.atLimit({ usageStatus: 'network' }, NOW), false);
+    assert.equal(L.ageMinutes('2026-11-08T15:54:00Z', NOW), 6);
+    assert.equal(L.ageMinutes('2026-11-08T15:59:40Z', NOW), 0);
+    assert.equal(L.ageMinutes('', NOW), -1);
+    assert.equal(L.ageMinutes('garbage', NOW), -1);
 });

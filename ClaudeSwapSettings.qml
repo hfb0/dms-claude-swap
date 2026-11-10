@@ -26,14 +26,14 @@ PluginSettings {
     ToggleSetting {
         settingKey: "alerts"
         label: I18n.trFor("claudeSwap", "Usage alerts")
-        description: I18n.trFor("claudeSwap", "Notify when the active account reaches 75%, 85% and 95% of its 5-hour or weekly limit")
+        description: I18n.trFor("claudeSwap", "Notify at 80% and 95% of a limit, only when no other account can take over (auto switch off, or every other account at its switch point)")
         defaultValue: true
     }
 
     ToggleSetting {
         settingKey: "paceAlerts"
         label: I18n.trFor("claudeSwap", "Pace alerts")
-        description: I18n.trFor("claudeSwap", "Notify when weekly usage is well ahead of pace and would run out before the reset")
+        description: I18n.trFor("claudeSwap", "Notify when weekly usage is well ahead of pace and would run out before the reset. Same rule: only when no other account can take over")
         defaultValue: true
     }
 

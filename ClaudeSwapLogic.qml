@@ -143,8 +143,10 @@ QtObject {
 
     // ---- pace and alerts ----
 
-    // Usage levels that raise a notification, lowest first.
-    readonly property var alertLevels: [75, 85, 95]
+    // Usage levels that raise a notification, lowest first. Two on purpose: near
+    // the end of a session usage climbs fast, and a third level arrived minutes
+    // after the previous one.
+    readonly property var alertLevels: [80, 95]
     readonly property var alertWindows: ["fiveHour", "sevenDay"]
 
     // cswap only computes pace for weekly windows, and only once a cycle is under way.
@@ -162,6 +164,58 @@ QtObject {
 
     function windowKey(n, name, w) {
         return n + "|" + name + "|" + resetBucket(w)
+    }
+
+    // True once the window's reset time is behind us. cswap keeps serving the
+    // previous reading for a minute or so after a reset (100%, reset in the past).
+    function resetPassed(w, nowSec) {
+        var t = w && w.resetsAt ? Date.parse(w.resetsAt) : NaN
+        return !isNaN(t) && t / 1000 <= nowSec
+    }
+
+    // Whether the auto switch could use this account: enabled, with a reading, and
+    // every known 5h/weekly window under the switch line. A window whose reset has
+    // passed counts as renewed. Per-model limits are left out, as in cswap auto's
+    // default decision (it only watches them when autoswitch.model names them).
+    function hasRoom(a, threshold, nowSec) {
+        if (!a || a.disabled) return false
+        var u = usageOf(a)
+        if (!u) return false
+        var known = 0
+        var wins = [u.fiveHour, u.sevenDay]
+        for (var i = 0; i < wins.length; i++) {
+            var w = wins[i]
+            if (!w || typeof w.pct !== "number") continue
+            known++
+            if (!resetPassed(w, nowSec) && w.pct >= threshold) return false
+        }
+        return known > 0
+    }
+
+    // Another account the auto switch could move to. `accounts` may be a QVariantList.
+    function hasFallback(accounts, activeNumber, threshold, nowSec) {
+        var n = accounts && typeof accounts.length === "number" ? accounts.length : 0
+        for (var i = 0; i < n; i++)
+            if (accounts[i] && accounts[i].number !== activeNumber && hasRoom(accounts[i], threshold, nowSec))
+                return true
+        return false
+    }
+
+    // Some 5h/weekly window is at 100% and has not reset yet.
+    function atLimit(a, nowSec) {
+        var u = usageOf(a)
+        if (!u) return false
+        var wins = [u.fiveHour, u.sevenDay]
+        for (var i = 0; i < wins.length; i++)
+            if (wins[i] && typeof wins[i].pct === "number" && wins[i].pct >= 100 && !resetPassed(wins[i], nowSec))
+                return true
+        return false
+    }
+
+    // Whole minutes since an ISO time (cswap's usageFetchedAt), or -1.
+    function ageMinutes(iso, nowSec) {
+        var t = iso ? Date.parse(iso) : NaN
+        return isNaN(t) ? -1 : Math.max(0, Math.floor((nowSec - t / 1000) / 60))
     }
 
     // Per-model weekly limits (cswap's `scoped`, e.g. Fable) that have a reading.
@@ -182,16 +236,22 @@ QtObject {
     // Alerts for the active account. `sent` maps windowKey -> highest level already
     // notified (and windowKey + "|pace" -> 1); it is returned updated, with the
     // cycles that have already reset dropped. Only fresh readings count: an alert
-    // from lastGoodUsage would report old numbers as news.
-    // opts: {levels: bool, pace: bool}
+    // from lastGoodUsage would report old numbers as news, and neither does a
+    // window whose reset already passed.
+    // opts: {levels: bool, pace: bool, quiet: bool}. `quiet` (another account can
+    // take over) skips every alert without recording it, so the current level
+    // still fires once that reserve is gone.
     function usageAlerts(acct, sent, opts, nowSec) {
         if (!acct) return { alerts: [], sent: sent }
         var next = {}
         for (var k in sent) {
+            // The bucket rounds resetsAt to 10 minutes, up to 5 minutes early:
+            // keep the entry a full bucket longer so a live window is never forgotten.
             var bucket = parseInt(k.split("|")[2], 10)
-            if (bucket * 600 > nowSec) next[k] = sent[k]
+            if (bucket * 600 + 600 > nowSec) next[k] = sent[k]
         }
         var alerts = []
+        if (opts.quiet) return { alerts: alerts, sent: next }
         var top = alertLevels[alertLevels.length - 1]
         var u = acct.usage || {}
         // Account-wide windows, then per-model ones ("scoped:Fable"), each with its own state.
@@ -203,7 +263,7 @@ QtObject {
             entries.push({ name: "scoped:" + sc[s].name, w: sc[s].win, model: sc[s].name })
         for (var e = 0; e < entries.length; e++) {
             var name = entries[e].name, w = entries[e].w, model = entries[e].model
-            if (!w || typeof w.pct !== "number" || resetBucket(w) < 0) continue
+            if (!w || typeof w.pct !== "number" || resetBucket(w) < 0 || resetPassed(w, nowSec)) continue
             var key = windowKey(acct.number, name, w)
             if (opts.levels) {
                 var hit = 0
@@ -260,13 +320,14 @@ QtObject {
         }
     }
 
-    // One line of `cswap auto --json` -> "switch" | "exhausted" | null, plus the target.
+    // One line of `cswap auto --json` -> "switch" | "exhausted" | null, plus the target
+    // or the earliest time an account comes back ("" when cswap does not know).
     function parseAutoEvent(line) {
         var ev
         try { ev = JSON.parse(line) } catch (e) { return { kind: null } }
         if (!ev || typeof ev !== "object") return { kind: null }
         if (ev.event === "switch") return { kind: "switch", to: ev.to }
-        if (ev.event === "all-exhausted") return { kind: "exhausted" }
+        if (ev.event === "all-exhausted") return { kind: "exhausted", resetsAt: ev.earliestResetAt || "" }
         return { kind: null }
     }
 }

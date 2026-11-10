@@ -15,7 +15,7 @@ PluginComponent {
 
     ClaudeSwapLogic { id: logic }
 
-    // Colors follow the alert levels (75/85/95): yellow from the first alert, red from the urgent one.
+    // Colors follow the alert levels (80/95): yellow from the first alert, red from the urgent one.
     readonly property int warnPct: logic.alertLevels[0]
     readonly property int critPct: logic.alertLevels[logic.alertLevels.length - 1]
 
@@ -73,16 +73,19 @@ PluginComponent {
             ? I18n.trFor("claudeSwap", "+%1 pts vs pace").arg(pace.delta)
             : I18n.trFor("claudeSwap", "On pace")
     }
-    function countdown(iso) {
-        const c = logic.countdown(iso, now)
-        return c === null ? I18n.trFor("claudeSwap", "now") : c
+    function nowSec() { return Math.floor(Date.now() / 1000) }
+    // "" when unknown or already past: cswap still shows the old reading for a minute
+    // or so after a reset, and "resets in now" reads wrong.
+    function countdown(iso, at) {
+        return logic.countdown(iso, at === undefined ? now : at) || ""
     }
     function summary(a) {
         const u = usageOf(a)
         if (!u) return a.usageStatus && a.usageStatus !== "ok" ? I18n.trFor("claudeSwap", "no reading (%1)").arg(a.usageStatus) : I18n.trFor("claudeSwap", "no reading")
         const parts = []
         const f = pct(u.fiveHour), w = pct(u.sevenDay)
-        if (f >= 0) parts.push(I18n.trFor("claudeSwap", "5h %1% · resets in %2").arg(f).arg(countdown(u.fiveHour.resetsAt)))
+        const c = f >= 0 ? countdown(u.fiveHour.resetsAt) : ""
+        if (f >= 0) parts.push(c ? I18n.trFor("claudeSwap", "5h %1% · resets in %2").arg(f).arg(c) : I18n.trFor("claudeSwap", "5h %1%").arg(f))
         if (w >= 0) parts.push(I18n.trFor("claudeSwap", "week %1%").arg(w))
         return parts.join(" · ")
     }
@@ -123,7 +126,8 @@ PluginComponent {
                 root.publish({ loaded: true, installed: true, lastError: I18n.trFor("claudeSwap", "unexpected output from cswap list") })
             else {
                 root.publish({ loaded: true, installed: true, lastError: "", accounts: r.accounts, activeNumber: r.activeNumber })
-                root.checkAlerts(r.accounts.find(a => a.number === r.activeNumber) || null)
+                root.checkAlerts(r.accounts.find(a => a.number === r.activeNumber) || null, r.accounts)
+                root.checkRecovery(r.accounts, r.activeNumber)
             }
         })
     }
@@ -132,33 +136,51 @@ PluginComponent {
     readonly property bool levelAlertsOn: pluginData.alerts !== false
     readonly property bool paceAlertsOn: pluginData.paceAlerts !== false
 
-    // Name of an alert's window for the notification text.
+    // Name of an alert's window inside a sentence ("... of the weekly limit used").
     function windowName(a) {
         if (a.model) return I18n.trFor("claudeSwap", "%1 weekly").arg(a.model)
         return a.window === "fiveHour" ? I18n.trFor("claudeSwap", "5-hour") : I18n.trFor("claudeSwap", "weekly")
     }
+    // The same window as a line heading, for notifications that list several.
+    function windowTitle(a) {
+        if (a.model) return I18n.trFor("claudeSwap", "%1 weekly limit").arg(a.model)
+        return a.window === "fiveHour" ? I18n.trFor("claudeSwap", "5-hour limit") : I18n.trFor("claudeSwap", "Weekly limit")
+    }
 
-    function checkAlerts(acct) {
+    // Alerts only matter when nothing will take over: with auto switch on and another
+    // account under the switch line, reaching the limit just means a switch.
+    function checkAlerts(acct, accounts) {
         if (!isOwner || !(levelAlertsOn || paceAlertsOn)) return
         let sent = {}
         try { sent = JSON.parse(pluginData.alertsSent || "{}") || {} } catch (e) {}
-        const r = logic.usageAlerts(acct, sent, { levels: levelAlertsOn, pace: paceAlertsOn }, Math.floor(Date.now() / 1000))
-        for (const a of r.alerts) {
-            const reset = countdown(a.resetsAt)
-            if (a.kind === "level")
-                Quickshell.execDetached(logic.notifyCommand(
-                    I18n.trFor("claudeSwap", "Claude: %1% of the %2 limit used").arg(a.pct).arg(windowName(a)),
-                    I18n.trFor("claudeSwap", "%1 · resets in %2").arg(label(acct)).arg(reset),
-                    a.level >= 95 ? "critical" : "normal",
-                    "claudeSwap-" + acct.number + "-" + a.window))
-            else
-                Quickshell.execDetached(logic.notifyCommand(
-                    I18n.trFor("claudeSwap", "Claude: weekly usage ahead of pace"),
-                    I18n.trFor("claudeSwap", "%1 · %2% used, %3% expected by now. At this rate it runs out before the reset in %4.")
-                        .arg(label(acct)).arg(a.pct).arg(a.expected).arg(reset),
-                    "normal",
-                    "claudeSwap-" + acct.number + "-" + a.window + "-pace"))
+        const at = nowSec()
+        const quiet = autoOn && installed && !!acct && logic.hasFallback(accounts, acct.number, threshold, at)
+        const r = logic.usageAlerts(acct, sent, { levels: levelAlertsOn, pace: paceAlertsOn, quiet: quiet }, at)
+        // Windows that cross a level together (weekly and Fable often do) share one
+        // notification, and its tag replaces the account's previous level alert.
+        const levels = r.alerts.filter(a => a.kind === "level")
+        if (levels.length === 1) {
+            const a = levels[0]
+            Quickshell.execDetached(logic.notifyCommand(
+                I18n.trFor("claudeSwap", "Claude: %1% of the %2 limit used").arg(a.pct).arg(windowName(a)),
+                I18n.trFor("claudeSwap", "%1 · resets in %2").arg(label(acct)).arg(countdown(a.resetsAt, at)),
+                a.level >= critPct ? "critical" : "normal",
+                "claudeSwap-" + acct.number + "-levels"))
+        } else if (levels.length > 1) {
+            Quickshell.execDetached(logic.notifyCommand(
+                I18n.trFor("claudeSwap", "Claude: %1 is close to its limits").arg(label(acct)),
+                levels.map(a => I18n.trFor("claudeSwap", "%1: %2% · resets in %3")
+                    .arg(windowTitle(a)).arg(a.pct).arg(countdown(a.resetsAt, at))).join("\n"),
+                levels.some(a => a.level >= critPct) ? "critical" : "normal",
+                "claudeSwap-" + acct.number + "-levels"))
         }
+        for (const a of r.alerts.filter(a => a.kind === "pace"))
+            Quickshell.execDetached(logic.notifyCommand(
+                I18n.trFor("claudeSwap", "Claude: weekly usage ahead of pace"),
+                I18n.trFor("claudeSwap", "%1 · %2% used, %3% expected by now. At this rate the quota runs out before the reset (%4 from now).")
+                    .arg(label(acct)).arg(a.pct).arg(a.expected).arg(countdown(a.resetsAt, at)),
+                "normal",
+                "claudeSwap-" + acct.number + "-" + a.window + "-pace"))
         if (JSON.stringify(r.sent) !== JSON.stringify(sent) && pluginService)
             pluginService.savePluginData(pluginId, "alertsSent", JSON.stringify(r.sent))
     }
@@ -166,17 +188,23 @@ PluginComponent {
     function switchTo(target) {
         if (busy) return
         busy = true
+        // cswap auto only leaves an account once it reaches the switch line, so a
+        // picked account with room keeps auto switch on. One already past the line
+        // would be switched away from on the next tick: then the pick wins.
+        const picked = accounts.find(a => a.number === target) || null
+        const keepAuto = logic.hasRoom(picked, threshold, nowSec())
         run("claudeSwap.switch", logic.switchArgs(target), function (out, code) {
             root.busy = false
             const r = logic.parseSwitch(out)
             if (!r.ok)
                 ToastService.showError(I18n.trFor("claudeSwap", "Claude: failed to switch account"))
-            else if (r.switched && root.autoOn) {
-                // A hand-picked account wins: the auto loop would otherwise switch away from it.
+            else if (r.switched && root.autoOn && !keepAuto) {
                 root.setAuto(false)
-                ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: now on %1. Auto switch turned off because you picked the account.").arg(root.label(r.to)))
-            } else if (r.switched)
-                ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: now on %1").arg(root.label(r.to)))
+                ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: now using %1. Auto switch turned off, or it would switch away from this account right away.").arg(root.label(r.to)))
+            } else if (r.switched) {
+                root.endExhausted()
+                ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: now using %1").arg(root.label(r.to)))
+            }
             else
                 ToastService.showWarning(I18n.trFor("claudeSwap", "Claude: did not switch — %1").arg(r.reason || I18n.trFor("claudeSwap", "no account available")))
             root.refresh()
@@ -241,15 +269,50 @@ PluginComponent {
     }
 
     // ---- auto switch (owner only) ----
+
+    // All accounts exhausted. cswap repeats the event on every tick (about every
+    // 10 minutes), so it is shown once per episode.
+    property bool exhausted: false
+    // Set once the loop was restarted for an account that came back (see checkRecovery).
+    property bool nudged: false
+    function endExhausted() { exhausted = false; nudged = false }
+
     function onAutoEvent(line) {
         lockRetries = 0
         const ev = logic.parseAutoEvent(line)
         if (ev.kind === "switch") {
-            ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: quota limit reached, switched to %1").arg(label(ev.to)))
+            endExhausted()
+            ToastService.showInfo(I18n.trFor("claudeSwap", "Claude: limit reached, switched to %1").arg(label(ev.to)))
             refresh()
-        } else if (ev.kind === "exhausted") {
-            ToastService.showWarning(I18n.trFor("claudeSwap", "Claude: all accounts exhausted"))
+        } else if (ev.kind === "exhausted" && !exhausted) {
+            exhausted = true
+            const back = countdown(ev.resetsAt, nowSec())
+            ToastService.showWarning(back
+                ? I18n.trFor("claudeSwap", "Claude: all accounts exhausted. The first one is back in %1.").arg(back)
+                : I18n.trFor("claudeSwap", "Claude: all accounts exhausted"))
         }
+    }
+
+    // While everything is exhausted, cswap auto sleeps up to 10 minutes between
+    // ticks, and its rechecks of the exhausted accounts run on their own schedule,
+    // so a quota that comes back early (a reset granted on claude.ai) could wait
+    // for two of those. Each `cswap list` here shows cswap's latest reading: once
+    // another account has room, restart the loop, whose first tick is immediate.
+    function checkRecovery(list, activeNumber) {
+        if (!isOwner || !exhausted) return
+        const at = nowSec()
+        if (logic.hasRoom(list.find(a => a.number === activeNumber) || null, threshold, at)) {
+            endExhausted()   // the active account itself came back
+        } else if (!nudged && autoProc.running && logic.hasFallback(list, activeNumber, threshold, at)) {
+            nudged = true
+            restartAuto()
+        }
+    }
+
+    property bool restarting: false
+    function restartAuto() {
+        restarting = true
+        autoProc.running = false   // onExited starts it again
     }
 
     function syncAuto() {
@@ -260,7 +323,7 @@ PluginComponent {
             autoProc.running = false
     }
 
-    onAutoOnChanged: { lockRetries = 0; syncAuto() }
+    onAutoOnChanged: { lockRetries = 0; endExhausted(); syncAuto() }
     onInstalledChanged: syncAuto()
     onThresholdChanged: if (autoProc.running) autoProc.running = false   // the watchdog restarts it with the new threshold
 
@@ -270,7 +333,10 @@ PluginComponent {
         stdout: SplitParser { onRead: data => root.onAutoEvent(data) }
         // Lock busy right after a reload: the previous owner's process is still exiting.
         onExited: (code, status) => {
-            if (code === logic.exitLocked && root.isOwner && root.autoOn && ++root.lockRetries < root.maxLockRetries)
+            if (root.restarting) {
+                root.restarting = false
+                Qt.callLater(root.syncAuto)
+            } else if (code === logic.exitLocked && root.isOwner && root.autoOn && ++root.lockRetries < root.maxLockRetries)
                 lockRetry.restart()
         }
     }
@@ -822,6 +888,18 @@ PluginComponent {
                             StyledText {
                                 visible: !acct.u
                                 text: root.summary(acct.modelData)
+                                font.pixelSize: Theme.fontSizeSmall
+                                color: Theme.surfaceVariantText
+                            }
+                            // Refresh only re-reads what cswap has: it rechecks an exhausted
+                            // account about every 10 minutes (poll_policy.EXHAUSTED_INTERVAL_S)
+                            // to stay within the usage endpoint's hourly budget.
+                            StyledText {
+                                readonly property int age: logic.ageMinutes(acct.modelData.usageFetchedAt || acct.modelData.lastGoodFetchedAt, root.now)
+                                visible: age >= 0 && logic.atLimit(acct.modelData, root.now)
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                text: I18n.trFor("claudeSwap", "Checked %1 min ago. cswap rechecks about every 10 min.").arg(Math.max(1, age))
                                 font.pixelSize: Theme.fontSizeSmall
                                 color: Theme.surfaceVariantText
                             }

@@ -45,7 +45,9 @@ this one also changes the active account.
 **Automatic switching**<br />
 When enabled, switches to another account once the active account reaches its limit. The pencil
 button sets an earlier threshold: 80%, 90%, 95%, or any value from 50 to 100. Selecting an account
-manually disables automatic switching.
+manually keeps automatic switching on, unless that account is already past the threshold (it would
+be switched away from right away). When every account is exhausted and one comes back early, for
+example after a reset granted on claude.ai, the plugin switches to it as soon as claude-swap sees it.
 
 </td>
 <td width="50%" valign="top">
@@ -68,8 +70,10 @@ the numbers. Can be turned off in the settings (gear button at the top of the po
 <td valign="top">
 
 **Usage alerts**<br />
-Desktop notifications when the active account reaches 75%, 85% and 95% of a limit (per-model
-limits included), and when it is ahead of pace. Each alert fires once per reset cycle and replaces the previous one.
+Desktop notifications at 80% and 95% of a limit (per-model limits included) and when weekly usage
+is ahead of pace, only when no other account can take over: with automatic switching on and another
+account available, reaching the limit just means a switch. Each alert fires once per reset cycle, and
+limits that cross a level together share one notification.
 
 </td>
 </tr>
@@ -78,7 +82,7 @@ limits included), and when it is ahead of pace. Each alert fires once per reset 
 
 **Bar widget**<br />
 Shows the plugin icon, lit while automatic switching is enabled, and the usage of the limit closest
-to running out. The value turns yellow at 75% and red at 95%, matching the alerts. A full style
+to running out. The value turns yellow at 80% and red at 95%, matching the alerts. A full style
 shows both limits as rings.
 
 </td>
@@ -157,6 +161,9 @@ cswap add            # 3. save that account too
 - **Automatic switching** runs `cswap auto` as a process owned by the shell, so no systemd unit is
   required. A `flock` lock and a single owner instance across bars keep one process running on
   multi-monitor setups.
+- **Usage readings** come from claude-swap's cache. It rechecks an exhausted account about every
+  10 minutes to stay within the usage endpoint's hourly budget, so the refresh button cannot show a
+  quota that came back sooner; the card of an exhausted account shows when it was last checked.
 - **Pace** is computed by claude-swap for weekly windows only. An account is marked as ahead when
   it is 15 or more points above a linear pace. The projection is linear, so bursty usage makes it
   less accurate.
