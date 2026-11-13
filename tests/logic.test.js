@@ -331,3 +331,16 @@ test('atLimit and ageMinutes describe an exhausted account\'s reading', () => {
     assert.equal(L.ageMinutes('', NOW), -1);
     assert.equal(L.ageMinutes('garbage', NOW), -1);
 });
+
+test('oldestReading is when the stalest shown reading was taken, so one that failed to update shows', () => {
+    const at = iso => Date.parse(iso) / 1000;
+    assert.equal(L.oldestReading([
+        { usageFetchedAt: '2026-11-08T15:59:00Z' },
+        { usageFetchedAt: '2026-11-08T15:50:00Z' },          // e.g. backing off after a 429
+        { lastGoodFetchedAt: '2026-11-08T15:55:00Z' },
+        { usageStatus: 'relogin-required' },                  // no reading: not counted
+    ]), at('2026-11-08T15:50:00Z'));
+    assert.equal(L.oldestReading([{ usageStatus: 'error' }]), -1);
+    assert.equal(L.oldestReading([]), -1);
+    assert.equal(L.oldestReading({ length: 1, 0: { usageFetchedAt: '2026-11-08T15:59:00Z' } }), at('2026-11-08T15:59:00Z'));
+});

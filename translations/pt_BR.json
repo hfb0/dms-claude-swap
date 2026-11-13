@@ -226,5 +226,8 @@
   },
   "weekly": {
     "weekly": "semanal"
+  },
+  "Usage read at %1": {
+    "Usage read at %1": "Lido às %1"
   }
 }

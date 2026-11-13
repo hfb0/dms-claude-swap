@@ -113,8 +113,9 @@ PluginComponent {
         Proc.runCommand(id, logic.runCommand(args), cb, 0, 60000)
     }
 
-    function refresh() {
+    function refresh(done) {
         run("claudeSwap.list", ["list", "--json"], function (out, code) {
+            if (done) done()
             if (code === logic.exitMissing) {
                 root.publish({ loaded: true, installed: false })
                 return
@@ -138,14 +139,21 @@ PluginComponent {
     // cswap's stored reading.
     readonly property string forceHelper: Qt.resolvedUrl("force-refresh.py").toString().replace(/^file:\/\//, "")
     property bool forcing: false
+    readonly property real oldestReadingSec: logic.oldestReading(accounts)
+    // "15:16" today, the locale's short date and time otherwise.
+    function clockText(sec) {
+        const d = new Date(sec * 1000)
+        return d.toDateString() === new Date().toDateString()
+            ? Qt.formatTime(d, "HH:mm")
+            : d.toLocaleString(Qt.locale(), Locale.ShortFormat)
+    }
     function forceRefresh() {
         if (forcing) return
         forcing = true
         Proc.runCommand("claudeSwap.force", logic.forceRefreshCommand(forceHelper), function (out, code) {
-            root.forcing = false
             if (code !== 0 && code !== logic.exitMissing)
                 console.warn("claudeSwap: forced refresh failed (exit " + code + "), showing cswap's stored reading")
-            root.refresh()
+            root.refresh(function () { root.forcing = false })
         }, 0, 30000)
     }
 
@@ -596,8 +604,16 @@ PluginComponent {
                         buttonSize: Theme.buttonHeightXXS
                         tooltipText: I18n.trFor("claudeSwap", "Refresh")
                         tooltipSide: "bottom"
-                        enabled: root.installed && !root.forcing
+                        enabled: root.installed
                         onClicked: root.forceRefresh()
+                        // Spins while cswap reads (same pattern as DMS's system update widget).
+                        RotationAnimator on rotation {
+                            from: 0; to: 360
+                            duration: Theme.expressiveDurations.extraLarge
+                            loops: Animation.Infinite
+                            running: root.forcing && !SettingsData.reduceMotion
+                            onRunningChanged: if (!running) target.rotation = 0
+                        }
                     }
                 }
             }
@@ -922,6 +938,16 @@ PluginComponent {
                             }
                         }
                     }
+                }
+
+                // When the shown usage was read; Refresh moves it to now.
+                StyledText {
+                    readonly property real readAt: root.oldestReadingSec
+                    visible: readAt > 0
+                    width: parent.width
+                    text: I18n.trFor("claudeSwap", "Usage read at %1").arg(root.clockText(readAt))
+                    font.pixelSize: Theme.fontSizeSmall
+                    color: Theme.surfaceVariantText
                 }
 
                 StyledText {

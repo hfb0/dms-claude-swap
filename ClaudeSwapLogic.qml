@@ -226,6 +226,20 @@ QtObject {
         return isNaN(t) ? -1 : Math.max(0, Math.floor((nowSec - t / 1000) / 60))
     }
 
+    // Epoch seconds of the stalest reading among the accounts (cswap's usageFetchedAt),
+    // or -1. The oldest one, so an account that failed to update shows in the time.
+    // Takes QVariantLists too (see scopedWindows).
+    function oldestReading(accounts) {
+        var oldest = -1
+        for (var i = 0; accounts && i < accounts.length; i++) {
+            var a = accounts[i] || {}
+            var iso = a.usageFetchedAt || a.lastGoodFetchedAt
+            var t = iso ? Date.parse(iso) : NaN
+            if (!isNaN(t) && (oldest < 0 || t / 1000 < oldest)) oldest = t / 1000
+        }
+        return oldest
+    }
+
     // Per-model weekly limits (cswap's `scoped`, e.g. Fable) that have a reading.
     // Model names never contain "|", which windowKey uses as a separator.
     // Lists read back from PluginService.globalVars are QVariantLists, not JS arrays
