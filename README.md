@@ -161,9 +161,12 @@ cswap add            # 3. save that account too
 - **Automatic switching** runs `cswap auto` as a process owned by the shell, so no systemd unit is
   required. A `flock` lock and a single owner instance across bars keep one process running on
   multi-monitor setups.
-- **Usage readings** come from claude-swap's cache. It rechecks an exhausted account about every
-  10 minutes to stay within the usage endpoint's hourly budget, so the refresh button cannot show a
-  quota that came back sooner; the card of an exhausted account shows when it was last checked.
+- **Usage readings** come from claude-swap's cache. It rechecks an account every 3 to 10 minutes
+  (an exhausted one about every 10) to stay within the usage endpoint's hourly budget. The refresh
+  button makes claude-swap read every account now, so a reset granted on claude.ai shows up right
+  away; accounts read in the last 30 seconds, or backing off after an error, are skipped. This goes
+  through claude-swap's internals (`force-refresh.py`, run on claude-swap's own Python), so if a
+  future release changes them, refresh falls back to the cached reading.
 - **Pace** is computed by claude-swap for weekly windows only. An account is marked as ahead when
   it is 15 or more points above a linear pace. The projection is linear, so bursty usage makes it
   less accurate.

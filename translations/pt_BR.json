@@ -71,8 +71,8 @@
   "Change when to switch": {
     "Change when to switch": "Escolher quando trocar"
   },
-  "Checked %1 min ago. cswap rechecks about every 10 min.": {
-    "Checked %1 min ago. cswap rechecks about every 10 min.": "Conferida há %1 min. O cswap confere de novo a cada ~10 min."
+  "Checked %1 min ago. Refresh to check now.": {
+    "Checked %1 min ago. Refresh to check now.": "Conferida há %1 min. Atualize para conferir agora."
   },
   "Claude Accounts": {
     "Claude Accounts": "Contas do Claude"

@@ -16,6 +16,14 @@ QtObject {
         return ["sh", "-c", pathPrefix + 'command -v cswap >/dev/null || exit 127; exec cswap "$@"', "sh"].concat(args)
     }
 
+    // The Refresh button: force-refresh.py imports cswap, so it runs on the interpreter
+    // the cswap launcher's shebang names (uv and pipx write a venv python path there).
+    // 126 when the shebang is not a plain path, e.g. `#!/usr/bin/env python3`.
+    function forceRefreshCommand(helperPath) {
+        return ["sh", "-c", pathPrefix + 'c=$(command -v cswap) || exit 127; py=$(sed -n "1s/^#!//p" "$c"); '
+                + '[ -x "$py" ] || exit 126; exec "$py" -I "$1"', "sh", helperPath]
+    }
+
     // Lock lives in the private runtime dir; ~/.cache is the fallback, never a shared /tmp.
     function lockFile(runtimeDir, home) {
         return (runtimeDir ? runtimeDir : home + "/.cache") + "/dms-claude-swap-auto.lock"

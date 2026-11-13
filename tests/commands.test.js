@@ -93,3 +93,33 @@ test('add account saves the current account first, then signs in and saves the n
         assert.match(r.stdout, /added/);
     }
 });
+
+// A cswap launcher whose shebang names `interp` (uv and pipx write a venv python there).
+function launcher(home, interp) {
+    fs.writeFileSync(path.join(home, '.local', 'bin', 'cswap'), `#!${interp}\nexit 0\n`, { mode: 0o755 });
+}
+
+test('forced refresh: missing cswap exits with exitMissing', () => {
+    const { env } = sandbox(false);
+    assert.equal(run(L.forceRefreshCommand('/x/force-refresh.py'), env).status, L.exitMissing);
+});
+
+test('forced refresh runs the helper with the interpreter cswap runs on, isolated', () => {
+    const { home, env } = sandbox(false);
+    const py = path.join(home, 'venv python');
+    fs.writeFileSync(py, '#!/bin/sh\nfor a in "$@"; do echo "arg:$a"; done\n', { mode: 0o755 });
+    launcher(home, py);
+    const helper = path.join(home, 'my plugin', '$(touch pwned).py');
+    const r = run(L.forceRefreshCommand(helper), env);
+    assert.equal(r.status, 0);
+    assert.deepEqual(r.stdout.trim().split('\n'), ['arg:-I', 'arg:' + helper]);
+    assert.equal(fs.existsSync(path.join(home, 'pwned')), false);
+});
+
+test('forced refresh gives up when the launcher does not name an interpreter path', () => {
+    const { home, env } = sandbox(false);
+    launcher(home, '/usr/bin/env python3');
+    const r = run(L.forceRefreshCommand('/x/force-refresh.py'), env);
+    assert.notEqual(r.status, 0);
+    assert.notEqual(r.status, L.exitMissing);
+});

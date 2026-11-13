@@ -132,6 +132,23 @@ PluginComponent {
         })
     }
 
+    // The Refresh button: make cswap read every account now (force-refresh.py), so a
+    // reset granted on claude.ai shows up without waiting for cswap's poll plan. When
+    // the helper fails (e.g. cswap's internals changed) the list still runs, with
+    // cswap's stored reading.
+    readonly property string forceHelper: Qt.resolvedUrl("force-refresh.py").toString().replace(/^file:\/\//, "")
+    property bool forcing: false
+    function forceRefresh() {
+        if (forcing) return
+        forcing = true
+        Proc.runCommand("claudeSwap.force", logic.forceRefreshCommand(forceHelper), function (out, code) {
+            root.forcing = false
+            if (code !== 0 && code !== logic.exitMissing)
+                console.warn("claudeSwap: forced refresh failed (exit " + code + "), showing cswap's stored reading")
+            root.refresh()
+        }, 0, 30000)
+    }
+
     // ---- usage alerts (owner only, so several bars do not notify twice) ----
     readonly property bool levelAlertsOn: pluginData.alerts !== false
     readonly property bool paceAlertsOn: pluginData.paceAlerts !== false
@@ -579,7 +596,8 @@ PluginComponent {
                         buttonSize: Theme.buttonHeightXXS
                         tooltipText: I18n.trFor("claudeSwap", "Refresh")
                         tooltipSide: "bottom"
-                        onClicked: root.refresh()
+                        enabled: root.installed && !root.forcing
+                        onClicked: root.forceRefresh()
                     }
                 }
             }
@@ -891,15 +909,14 @@ PluginComponent {
                                 font.pixelSize: Theme.fontSizeSmall
                                 color: Theme.surfaceVariantText
                             }
-                            // Refresh only re-reads what cswap has: it rechecks an exhausted
-                            // account about every 10 minutes (poll_policy.EXHAUSTED_INTERVAL_S)
-                            // to stay within the usage endpoint's hourly budget.
+                            // cswap rechecks an exhausted account about every 10 minutes
+                            // (poll_policy.EXHAUSTED_INTERVAL_S); Refresh reads it now.
                             StyledText {
                                 readonly property int age: logic.ageMinutes(acct.modelData.usageFetchedAt || acct.modelData.lastGoodFetchedAt, root.now)
                                 visible: age >= 0 && logic.atLimit(acct.modelData, root.now)
                                 width: parent.width
                                 wrapMode: Text.WordWrap
-                                text: I18n.trFor("claudeSwap", "Checked %1 min ago. cswap rechecks about every 10 min.").arg(Math.max(1, age))
+                                text: I18n.trFor("claudeSwap", "Checked %1 min ago. Refresh to check now.").arg(Math.max(1, age))
                                 font.pixelSize: Theme.fontSizeSmall
                                 color: Theme.surfaceVariantText
                             }
